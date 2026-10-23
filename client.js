@@ -21,6 +21,7 @@ window.__ModuleLoader__.load({
 
     const en = {
       summary: "Memory pipeline: extraction, consolidation, and the model both run on.",
+      inherit: "Inherit the triggering session",
       model: "Model",
       modelHint: "Model for the child agents. Empty inherits the triggering session.",
       provider: "Provider",
@@ -55,6 +56,7 @@ window.__ModuleLoader__.load({
 
     const zh = {
       summary: "记忆流水线：抽取、整合，以及两者使用的模型。",
+      inherit: "继承触发会话",
       model: "模型",
       modelHint: "子 agent 使用的模型。留空则继承触发会话。",
       provider: "Provider",
@@ -130,6 +132,19 @@ window.__ModuleLoader__.load({
     function Card(props) {
       const { t } = props
       const state = props.useCodexMemoryCard((snapshot) => snapshot)
+      const [catalog, setCatalog] = react.useState(null)
+      react.useEffect(() => {
+        let alive = true
+        props
+          .loadCatalog()
+          .then((response) => {
+            if (alive && response?.ok) setCatalog(response.value)
+          })
+          .catch(() => {})
+        return () => {
+          alive = false
+        }
+      }, [])
       if (props.view === "summary") return t("summary")
       const labels = {
         unavailable: t("unavailable"),
@@ -138,22 +153,80 @@ window.__ModuleLoader__.load({
         save: t("save"),
         saving: t("saving"),
       }
-      const children = FIELDS.map((field) =>
-        react.createElement(primitives.SettingsValueField, {
-          key: field.key,
-          id: `plugin-config-codex-memory-${field.key}`,
-          label: t(field.key),
-          hint: t(`${field.key}Hint`),
-          overriddenLabel: t("overridden"),
-          resetLabel: t("reset"),
-          invalidLabel: t("invalidNumber"),
-          numeric: field.numeric === true,
-          disabled: !state.writable,
-          ...state[field.key],
-          onEdit: (text) => props.edit(field.key, text),
-          onReset: () => props.resetField(field.key),
-        }),
-      )
+      const groups = catalog?.groups ?? []
+      const providers = groups.map((group) => group.id)
+      const models = groups.find((group) => group.id === state.provider?.value)?.models ?? []
+      const selectStyle = {
+        font: "inherit",
+        color: "inherit",
+        background: "transparent",
+        border: "1px solid currentColor",
+        borderRadius: "6px",
+        padding: "4px 6px",
+        width: "100%",
+      }
+      const row = (key, label, hint, control) =>
+        react.createElement(
+          "div",
+          { key, style: { display: "flex", flexDirection: "column", gap: "4px", margin: "8px 0" } },
+          react.createElement("label", { style: { fontWeight: 600 } }, label),
+          control,
+          react.createElement("span", { style: { opacity: 0.7, fontSize: "0.85em" } }, hint),
+        )
+      const children = [
+        row(
+          "provider",
+          t("provider"),
+          t("providerHint"),
+          react.createElement(
+            "select",
+            {
+              style: selectStyle,
+              value: state.provider?.value ?? "",
+              disabled: !state.writable,
+              onChange: (event) => props.edit("provider", event.target.value),
+            },
+            [
+              react.createElement("option", { key: "", value: "" }, t("inherit")),
+              ...providers.map((id) => react.createElement("option", { key: id, value: id }, id)),
+            ],
+          ),
+        ),
+        row(
+          "model",
+          t("model"),
+          t("modelHint"),
+          react.createElement(
+            "select",
+            {
+              style: selectStyle,
+              value: state.model?.value ?? "",
+              disabled: !state.writable || models.length === 0,
+              onChange: (event) => props.edit("model", event.target.value),
+            },
+            [
+              react.createElement("option", { key: "", value: "" }, t("inherit")),
+              ...models.map((model) => react.createElement("option", { key: model.id, value: model.id }, model.id)),
+            ],
+          ),
+        ),
+        ...FIELDS.filter((field) => field.key !== "model" && field.key !== "provider").map((field) =>
+          react.createElement(primitives.SettingsValueField, {
+            key: field.key,
+            id: `plugin-config-codex-memory-${field.key}`,
+            label: t(field.key),
+            hint: t(`${field.key}Hint`),
+            overriddenLabel: t("overridden"),
+            resetLabel: t("reset"),
+            invalidLabel: t("invalidNumber"),
+            numeric: field.numeric === true,
+            disabled: !state.writable,
+            ...state[field.key],
+            onEdit: (text) => props.edit(field.key, text),
+            onReset: () => props.resetField(field.key),
+          }),
+        ),
+      ]
       return react.createElement(
         primitives.SettingsForm,
         { labels, state, onSave: props.save, onDiscard: props.discard },
@@ -161,7 +234,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const inject = ["slots", "locale", "configForms"]
+    const inject = ["slots", "locale", "configForms", "remote", "remote.session"]
 
     function apply(ctx) {
       const t = ctx.locale.bind(LOCALE_NS)
@@ -177,7 +250,7 @@ window.__ModuleLoader__.load({
                   name: "plugins.bundle.config",
                   key: NS,
                   locale: LOCALE_NS,
-                  inject: () => card.inject(),
+                  inject: () => ({ ...card.inject(), loadCatalog: () => ctx.remote.session.modelCatalog() }),
                 },
                 Card,
               ),
