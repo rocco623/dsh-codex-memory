@@ -58,7 +58,7 @@ const ROLLOUT_SUMMARY_MAX_BYTES = 9_000
 // JSON object", which models satisfy with prose unless told otherwise.
 const STAGE1_TOOL_NOTE = `## Output delivery
 
-Do not print the JSON as text. Call \`memory_stage1_write_output\` exactly once with \`rollout_summary\` and \`rollout_slug\`; a reply that prints JSON without that call is discarded. The conversation is already rendered above — do not read session files or decode logs to find it.`
+Do not print the JSON as text. Call \`memory_stage1_write_output\` exactly once with \`rollout_summary\` and \`rollout_slug\`; a reply that prints JSON without that call is discarded. The conversation is already rendered above — do not read session files or decode logs to find it. End the turn with that call.`
 // MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_SUMMARY_TOKEN_LIMIT is 2,500 tokens; the
 // read path truncates the injected summary at that budget.
 const READ_PATH_SUMMARY_MAX_CHARS = 2_500 * 4
@@ -91,9 +91,12 @@ const DEFAULTS = {
   model: '',
   provider: '',
   // Codex uses ReasoningEffort::Low for stage one and Medium for stage two.
-  // Empty means "inherit": the loop rejects an effort the model does not support.
-  stage1ReasoningEffort: '',
-  stage2ReasoningEffort: '',
+  // Inheriting the parent's effort is wrong here: a parent on "high" makes the
+  // consolidation child spend the whole turn reasoning and end it with no text
+  // and no tool call, which is exactly how "did not call memory_write_summary"
+  // happens. Set '' to inherit anyway; the loop rejects an unsupported effort.
+  stage1ReasoningEffort: 'low',
+  stage2ReasoningEffort: 'medium',
   // Writes memories_v2/diagnostics.log with the cause chain of agent failures.
   diagnostics: true,
 }

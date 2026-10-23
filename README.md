@@ -93,8 +93,8 @@ dsh plugin --profile web add dsh-codex-memory
     diagnostics: true
     model: ''            # 留空 = 继承触发会话的模型
     provider: ''         # 留空 = 继承触发会话的 provider
-    stage1ReasoningEffort: ''   # Codex 用 low
-    stage2ReasoningEffort: ''   # Codex 用 medium
+    stage1ReasoningEffort: low    # 留空 = 继承触发会话；high 会让抽取想过头
+    stage2ReasoningEffort: medium # 留空 = 继承触发会话；high 会让整合把整轮耗在推理上
 ```
 
 ## 验证
