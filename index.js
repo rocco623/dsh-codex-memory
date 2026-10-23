@@ -188,6 +188,97 @@ export function apply(ctx, config = {}) {
   // Codex's V2 memory root (MemoryVersion::V2.directory_name()).
   const memoryRoot = join(home, 'memories_v2')
 
+  // ---- settings route ------------------------------------------------------
+  // The Plugins page renders no form of its own, and the primitive form model it
+  // exposes is not a public API. Owning both ends keeps the page working: this
+  // route reads the live config and persists edits through the config editor,
+  // the same service the first-party model settings use.
+  const CONFIG_KEYS = [
+    'model',
+    'provider',
+    'stage1ReasoningEffort',
+    'stage2ReasoningEffort',
+    'minRolloutIdleHours',
+    'maxRolloutAgeDays',
+    'maxRolloutsPerStartup',
+    'phase2SuccessCooldownSeconds',
+    'maxUnusedDays',
+    'concurrencyLimit',
+    'agentTimeoutMs',
+    'generateMemories',
+    'useMemories',
+    'disableOnExternalContext',
+    'diagnostics',
+  ]
+  const currentConfig = () => {
+    const values = {}
+    for (const key of CONFIG_KEYS) values[key] = opts[key]
+    return values
+  }
+  const readBody = (req) =>
+    new Promise((resolve, reject) => {
+      let text = ''
+      req.on('data', (chunk) => {
+        text += chunk
+        if (text.length > 1_000_000) req.destroy()
+      })
+      req.on('end', () => resolve(text))
+      req.on('error', reject)
+    })
+  const sendJson = (res, status, value) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(value))
+  }
+  ctx.inject?.(['webServer'], (scoped) => {
+    scoped.effect(
+      () =>
+        scoped.webServer.register({
+          kind: 'prefix',
+          path: '/dsh-codex-memory',
+          handler: async (req, res) => {
+            try {
+              const url = new URL(req.url ?? '/', 'http://localhost')
+              if (url.pathname === '/dsh-codex-memory/config' && req.method === 'GET') {
+                return sendJson(res, 200, { ok: true, values: currentConfig() })
+              }
+              if (url.pathname === '/dsh-codex-memory/config' && req.method === 'POST') {
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const incoming = body?.values
+                if (typeof incoming !== 'object' || incoming === null) {
+                  return sendJson(res, 400, { ok: false, error: 'values must be an object' })
+                }
+                const next = currentConfig()
+                for (const key of CONFIG_KEYS) {
+                  if (!(key in incoming)) continue
+                  const raw = incoming[key]
+                  if (typeof next[key] === 'number') {
+                    const parsed = Number(raw)
+                    if (!Number.isFinite(parsed)) return sendJson(res, 400, { ok: false, error: `${key} must be a number` })
+                    next[key] = parsed
+                  } else if (typeof next[key] === 'boolean') {
+                    next[key] = raw === true || raw === 'true'
+                  } else {
+                    next[key] = String(raw ?? '')
+                  }
+                }
+                const entry = ctx.fiber?.entry
+                const editor = ctx.get?.('configEditor')
+                if (entry === undefined || editor === undefined) {
+                  return sendJson(res, 409, { ok: false, error: 'this deployment has no config editor' })
+                }
+                await editor.edit(entry, () => next)
+                return sendJson(res, 200, { ok: true, values: next })
+              }
+              return sendJson(res, 404, { ok: false, error: 'not found' })
+            } catch (error) {
+              return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
+            }
+          },
+        }),
+      'dsh-codex-memory: settings route',
+    )
+  })
+
   const diagnosticsPath = join(memoryRoot, 'diagnostics.log')
   const diag = async (event, detail) => {
     if (!opts.diagnostics) return

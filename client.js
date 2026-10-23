@@ -1,9 +1,9 @@
-// Browser half of dsh-codex-memory: the settings page for this bundle.
+// Browser half of dsh-codex-memory: the settings section under Settings.
 //
-// The host renders nothing for us: the Plugins page hands `plugins.bundle.config`
-// to whichever bundle registered it, and the form is ours to build. The shape
-// below copies @deepseek-ai/dsh-client-ui-settings-agent-loop, the shipped page
-// that does the same thing over its own settings namespace.
+// Nothing here goes through the host's form primitives: the Plugins page owns no
+// form renderer, and its `SettingsFormModel` is not a public API. This page talks
+// to /dsh-codex-memory/config, which the Host half serves, and renders its own
+// fields.
 window.__ModuleLoader__.load({
   id: "dsh-codex-memory",
   factory: (require) => {
@@ -12,24 +12,26 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" })
 
     const react = require("react")
-    const primitives = require("@deepseek-ai/dsh-client-ui-primitives")
+    const h = react.createElement
 
-    /** The settings namespace is the loader entry id, which is also the package name. */
-    const NS = "dsh-codex-memory"
     /** Dictionary namespace owned by this page. */
-    const LOCALE_NS = "dsh-codex-memory.settings"
+    const NS = "dsh-codex-memory.settings"
+    /** Where the Host half answers reads and writes for this plugin's config. */
+    const ROUTE = "/dsh-codex-memory/config"
 
     const en = {
-      summary: "Memory pipeline: extraction, consolidation, and the model both run on.",
-      inherit: "Inherit the triggering session",
+      nav: "Memory",
+      title: "Memory",
+      description: "How the memory pipeline extracts, consolidates, and which model it uses.",
       model: "Model",
-      modelHint: "Model for the child agents. Empty inherits the triggering session.",
+      modelHint: "Model for the background agents. Empty inherits the triggering session.",
       provider: "Provider",
-      providerHint: "Provider for the child agents. Empty inherits the triggering session.",
+      providerHint: "Provider for the background agents. Empty inherits the triggering session.",
       stage1ReasoningEffort: "Extraction reasoning",
-      stage1ReasoningEffortHint: "off / low / high / max. Empty inherits the session; high tends to over-think this task.",
+      stage1ReasoningEffortHint: "high tends to over-think this task.",
       stage2ReasoningEffort: "Consolidation reasoning",
-      stage2ReasoningEffortHint: "off / low / high / max. DeepSeek has no medium; it maps medium to high.",
+      stage2ReasoningEffortHint: "DeepSeek maps medium to high, so only low and high differ.",
+      inherit: "Inherit the session",
       minRolloutIdleHours: "Idle hours before extraction",
       minRolloutIdleHoursHint: "A session must be quiet this long before it is summarized.",
       maxRolloutAgeDays: "Maximum rollout age (days)",
@@ -43,28 +45,35 @@ window.__ModuleLoader__.load({
       concurrencyLimit: "Extraction concurrency",
       concurrencyLimitHint: "How many sessions are extracted in parallel.",
       agentTimeoutMs: "Agent timeout (ms)",
-      agentTimeoutMsHint: "Hard limit for one child-agent run; 600000 is ten minutes.",
-      overridden: "Overridden",
-      reset: "Reset to default",
-      invalidNumber: "Enter a number, or leave blank to use the default.",
-      readOnly: "This deployment stores settings read-only.",
-      unavailable: "This plugin is not loaded, so it cannot be configured right now.",
+      agentTimeoutMsHint: "Hard limit for one background run; 600000 is ten minutes.",
+      generateMemories: "Write memories",
+      generateMemoriesHint: "Off stops extraction entirely.",
+      useMemories: "Inject memories",
+      useMemoriesHint: "Off stops injecting the summary into new sessions.",
+      disableOnExternalContext: "Skip sessions that used web or MCP",
+      disableOnExternalContextHint: "Keeps fetched external text out of memory.",
+      diagnostics: "Write diagnostics.log",
+      diagnosticsHint: "Records each run's decisions and failure chains.",
       save: "Save",
       saving: "Saving…",
-      saveFailed: "The deployment did not accept these values; they were left for you to correct.",
+      saved: "Saved.",
+      failed: "Not saved: ",
+      loading: "Loading…",
     }
 
     const zh = {
-      summary: "记忆流水线：抽取、整合，以及两者使用的模型。",
-      inherit: "继承触发会话",
+      nav: "记忆",
+      title: "记忆",
+      description: "记忆流水线如何抽取、整合，以及使用哪个模型。",
       model: "模型",
-      modelHint: "子 agent 使用的模型。留空则继承触发会话。",
+      modelHint: "后台 agent 使用的模型。留空则继承触发会话。",
       provider: "Provider",
-      providerHint: "子 agent 使用的 provider。留空则继承触发会话。",
+      providerHint: "后台 agent 使用的 provider。留空则继承触发会话。",
       stage1ReasoningEffort: "抽取思考强度",
-      stage1ReasoningEffortHint: "off / low / high / max。留空继承会话；high 容易在这个任务上想过头。",
+      stage1ReasoningEffortHint: "high 容易在这个任务上想过头。",
       stage2ReasoningEffort: "整合思考强度",
-      stage2ReasoningEffortHint: "off / low / high / max。DeepSeek 没有 medium，会映射成 high。",
+      stage2ReasoningEffortHint: "DeepSeek 把 medium 映射成 high，所以只有 low 和 high 有区别。",
+      inherit: "继承触发会话",
       minRolloutIdleHours: "抽取前空闲小时数",
       minRolloutIdleHoursHint: "会话安静这么久之后才会被总结。",
       maxRolloutAgeDays: "会话最长保留天数",
@@ -78,23 +87,29 @@ window.__ModuleLoader__.load({
       concurrencyLimit: "抽取并发数",
       concurrencyLimitHint: "同时抽取几个会话。",
       agentTimeoutMs: "子 agent 超时（毫秒）",
-      agentTimeoutMsHint: "单个子 agent 的运行上限，600000 是十分钟。",
-      overridden: "已覆盖",
-      reset: "恢复默认",
-      invalidNumber: "请填数字；留空表示使用默认值。",
-      readOnly: "本部署的设置为只读。",
-      unavailable: "该插件当前未加载，暂时无法配置。",
+      agentTimeoutMsHint: "单次后台运行的上限，600000 是十分钟。",
+      generateMemories: "写入记忆",
+      generateMemoriesHint: "关闭后完全停止抽取。",
+      useMemories: "注入记忆",
+      useMemoriesHint: "关闭后不再把摘要注入新会话。",
+      disableOnExternalContext: "跳过用过 web 或 MCP 的会话",
+      disableOnExternalContextHint: "避免把抓来的外部文本写进记忆。",
+      diagnostics: "写 diagnostics.log",
+      diagnosticsHint: "记录每次运行的判定和失败原因链。",
       save: "保存",
       saving: "保存中…",
-      saveFailed: "本部署没有接受这些值，已保留供你修改。",
+      saved: "已保存。",
+      failed: "未保存：",
+      loading: "加载中…",
     }
 
-    /** Fields the page edits, in display order. */
+    const EFFORTS = ["", "off", "low", "high", "max"]
+
     const FIELDS = [
-      { key: "model" },
-      { key: "provider" },
-      { key: "stage1ReasoningEffort" },
-      { key: "stage2ReasoningEffort" },
+      { key: "provider", select: "providers" },
+      { key: "model", select: "models" },
+      { key: "stage1ReasoningEffort", options: EFFORTS },
+      { key: "stage2ReasoningEffort", options: EFFORTS },
       { key: "minRolloutIdleHours", numeric: true },
       { key: "maxRolloutAgeDays", numeric: true },
       { key: "maxRolloutsPerStartup", numeric: true },
@@ -102,162 +117,175 @@ window.__ModuleLoader__.load({
       { key: "maxUnusedDays", numeric: true },
       { key: "concurrencyLimit", numeric: true },
       { key: "agentTimeoutMs", numeric: true },
+      { key: "generateMemories", boolean: true },
+      { key: "useMemories", boolean: true },
+      { key: "disableOnExternalContext", boolean: true },
+      { key: "diagnostics", boolean: true },
     ]
 
-    /** Staged form over this plugin's own settings namespace. */
-    class CodexMemoryCardController {
-      constructor(scope) {
-        this.form = new primitives.SettingsFormModel(
-          scope,
-          FIELDS.map((field) =>
-            field.numeric ? primitives.settingsNumberField(field.key) : primitives.settingsTextField(field.key),
-          ),
-        )
-        this.store = this.form.bind(() => {
-          const projection = { ...this.form.shell() }
-          for (const field of FIELDS) projection[field.key] = this.form.field(field.key)
-          return projection
-        })
-      }
-
-      inject() {
-        return { hooks: { codexMemoryCard: this.store }, ...this.form.actions() }
-      }
-
-      dispose() {
-        this.form.dispose()
-      }
+    const inputStyle = {
+      font: "inherit",
+      color: "inherit",
+      background: "transparent",
+      border: "1px solid currentColor",
+      borderRadius: "8px",
+      padding: "6px 8px",
+      minWidth: "240px",
     }
 
-    function Card(props) {
+    function Field(props) {
+      const { field, value, options, disabled, onChange, t } = props
+      let control
+      if (field.boolean) {
+        control = h('input', {
+          type: 'checkbox',
+          checked: value === true,
+          disabled,
+          onChange: (event) => onChange(event.target.checked),
+        })
+      } else if (field.select || field.options) {
+        const list = field.options ?? options ?? []
+        control = h(
+          'select',
+          { style: inputStyle, value: value ?? '', disabled, onChange: (event) => onChange(event.target.value) },
+          [
+            ...(field.options ? [] : [h('option', { key: '__inherit', value: '' }, t('inherit'))]),
+            ...list.map((option) => {
+              const value = option.value ?? option
+              const label = option.label ?? (value === '' ? t('inherit') : value)
+              return h('option', { key: value, value }, label)
+            }),
+          ],
+        )
+      } else {
+        control = h('input', {
+          type: field.numeric ? 'number' : 'text',
+          style: inputStyle,
+          value: value ?? '',
+          disabled,
+          onChange: (event) => onChange(event.target.value),
+        })
+      }
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '4px', padding: '10px 0' } },
+        h('label', { style: { fontWeight: 600 } }, t(field.key)),
+        control,
+        h('span', { style: { opacity: 0.65, fontSize: '0.85em' } }, t(`${field.key}Hint`)),
+      )
+    }
+
+    function Section(props) {
       const { t } = props
-      const state = props.useCodexMemoryCard((snapshot) => snapshot)
+      const [status, setStatus] = react.useState('loading')
+      const [values, setValues] = react.useState({})
       const [catalog, setCatalog] = react.useState(null)
+      const [message, setMessage] = react.useState(null)
+
       react.useEffect(() => {
         let alive = true
+        fetch(ROUTE, { headers: { accept: 'application/json' } })
+          .then((response) => response.json())
+          .then((body) => {
+            if (!alive || !body?.ok) return
+            setValues(body.values ?? {})
+            setStatus('ready')
+          })
+          .catch((error) => alive && setMessage(`${t('failed')}${error.message}`))
         props
           .loadCatalog()
-          .then((response) => {
-            if (alive && response?.ok) setCatalog(response.value)
-          })
+          .then((response) => alive && response?.ok && setCatalog(response.value))
           .catch(() => {})
         return () => {
           alive = false
         }
       }, [])
-      if (props.view === "summary") return t("summary")
-      const labels = {
-        unavailable: t("unavailable"),
-        readOnly: t("readOnly"),
-        saveFailed: t("saveFailed"),
-        save: t("save"),
-        saving: t("saving"),
+
+      const set = (key, value) => {
+        setValues((previous) => ({ ...previous, [key]: value }))
+        setMessage(null)
       }
+
       const groups = catalog?.groups ?? []
-      const providers = groups.map((group) => group.id)
-      const models = groups.find((group) => group.id === state.provider?.value)?.models ?? []
-      const selectStyle = {
-        font: "inherit",
-        color: "inherit",
-        background: "transparent",
-        border: "1px solid currentColor",
-        borderRadius: "6px",
-        padding: "4px 6px",
-        width: "100%",
+      const providerOptions = groups.map((group) => ({ value: group.id, label: group.id }))
+      const modelOptions =
+        groups
+          .find((group) => group.id === values.provider)
+          ?.models.map((model) => ({ value: model.id, label: model.id })) ?? []
+
+      const save = async () => {
+        setStatus('saving')
+        try {
+          const response = await fetch(ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ values }),
+          })
+          const body = await response.json()
+          if (!body?.ok) throw new Error(body?.error ?? `HTTP ${response.status}`)
+          setValues(body.values ?? values)
+          setMessage(t('saved'))
+        } catch (error) {
+          setMessage(`${t('failed')}${error.message}`)
+        } finally {
+          setStatus('ready')
+        }
       }
-      const row = (key, label, hint, control) =>
-        react.createElement(
-          "div",
-          { key, style: { display: "flex", flexDirection: "column", gap: "4px", margin: "8px 0" } },
-          react.createElement("label", { style: { fontWeight: 600 } }, label),
-          control,
-          react.createElement("span", { style: { opacity: 0.7, fontSize: "0.85em" } }, hint),
-        )
-      const children = [
-        row(
-          "provider",
-          t("provider"),
-          t("providerHint"),
-          react.createElement(
-            "select",
-            {
-              style: selectStyle,
-              value: state.provider?.value ?? "",
-              disabled: !state.writable,
-              onChange: (event) => props.edit("provider", event.target.value),
-            },
-            [
-              react.createElement("option", { key: "", value: "" }, t("inherit")),
-              ...providers.map((id) => react.createElement("option", { key: id, value: id }, id)),
-            ],
-          ),
-        ),
-        row(
-          "model",
-          t("model"),
-          t("modelHint"),
-          react.createElement(
-            "select",
-            {
-              style: selectStyle,
-              value: state.model?.value ?? "",
-              disabled: !state.writable || models.length === 0,
-              onChange: (event) => props.edit("model", event.target.value),
-            },
-            [
-              react.createElement("option", { key: "", value: "" }, t("inherit")),
-              ...models.map((model) => react.createElement("option", { key: model.id, value: model.id }, model.id)),
-            ],
-          ),
-        ),
-        ...FIELDS.filter((field) => field.key !== "model" && field.key !== "provider").map((field) =>
-          react.createElement(primitives.SettingsValueField, {
+
+      if (status === 'loading') return h('p', null, t('loading'))
+
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '560px' } },
+        h('h3', { style: { margin: '0 0 4px' } }, t('title')),
+        h('p', { style: { margin: '0 0 12px', opacity: 0.7 } }, t('description')),
+        ...FIELDS.map((field) =>
+          h(Field, {
             key: field.key,
-            id: `plugin-config-codex-memory-${field.key}`,
-            label: t(field.key),
-            hint: t(`${field.key}Hint`),
-            overriddenLabel: t("overridden"),
-            resetLabel: t("reset"),
-            invalidLabel: t("invalidNumber"),
-            numeric: field.numeric === true,
-            disabled: !state.writable,
-            ...state[field.key],
-            onEdit: (text) => props.edit(field.key, text),
-            onReset: () => props.resetField(field.key),
+            field,
+            value: values[field.key],
+            options: field.select === 'providers' ? providerOptions : field.select === 'models' ? modelOptions : undefined,
+            disabled: status === 'saving',
+            onChange: (value) => set(field.key, value),
+            t,
           }),
         ),
-      ]
-      return react.createElement(
-        primitives.SettingsForm,
-        { labels, state, onSave: props.save, onDiscard: props.discard },
-        children,
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: '12px', paddingTop: '12px' } },
+          h(
+            'button',
+            {
+              type: 'button',
+              disabled: status === 'saving',
+              style: { font: 'inherit', padding: '6px 16px', borderRadius: '8px', cursor: 'pointer' },
+              onClick: save,
+            },
+            status === 'saving' ? t('saving') : t('save'),
+          ),
+          message === null ? null : h('span', { style: { opacity: 0.75 } }, message),
+        ),
       )
     }
 
-    const inject = ["slots", "locale", "configForms", "remote", "remote.session"]
+    const inject = ["slots", "locale", "remote", "remote.session"]
 
     function apply(ctx) {
-      const t = ctx.locale.bind(LOCALE_NS)
-      ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), "dsh-codex-memory: dictionaries")
-      const card = new CodexMemoryCardController(ctx.configForms.get(NS))
-      ctx.effect(() => () => card.dispose(), "dsh-codex-memory: form subscription")
-      ctx.effect(
-        () =>
-          ctx.configForms.whileServed([NS], () =>
-            ctx.slots.inject("plugins.bundle.config", () =>
-              ctx.slots.register(
-                {
-                  name: "plugins.bundle.config",
-                  key: NS,
-                  locale: LOCALE_NS,
-                  inject: () => ({ ...card.inject(), loadCatalog: () => ctx.remote.session.modelCatalog() }),
-                },
-                Card,
-              ),
-            ),
-          ),
-        "dsh-codex-memory: settings page",
-      )
+      const t = ctx.locale.bind(NS)
+      ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-codex-memory: dictionaries")
+      ctx.slots.inject("settings.section", function* () {
+        yield ctx.slots.register(
+          {
+            name: "settings.section",
+            id: "codex-memory",
+            order: 35,
+            label: () => t("nav"),
+            locale: NS,
+            inject: () => ({ t, loadCatalog: () => ctx.remote.session.modelCatalog() }),
+          },
+          Section,
+        )
+      })
     }
 
     exports.apply = apply
