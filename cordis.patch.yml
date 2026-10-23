@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-codex-memory
+      name: dsh-codex-memory
+      config: {}

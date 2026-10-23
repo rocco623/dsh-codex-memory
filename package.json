@@ -1,0 +1,44 @@
+{
+  "name": "dsh-codex-memory",
+  "version": "0.9.0",
+  "description": "Codex's V2 memory pipeline for DeepSeek Harness: two-stage extraction, SQLite job table with lease and retry, git baseline diff gating, citation feedback.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rocco623/dsh-codex-memory.git"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "memory"
+  ],
+  "engines": {
+    "node": ">=22.5"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "db.js",
+    "workspace.js",
+    "storage.js",
+    "sessions.js",
+    "zstd.js",
+    "prompts.js",
+    "redact.js",
+    "citations.js",
+    "templates/**",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

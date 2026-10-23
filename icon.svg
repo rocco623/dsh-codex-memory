@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Memory">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#1F2430"/>
+  <path d="M20 20h24a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V24a4 4 0 0 1 4-4Z" fill="none" stroke="#8AB4FF" stroke-width="3"/>
+  <path d="M24 30h16M24 37h10" stroke="#8AB4FF" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="43" cy="43" r="6" fill="#1F2430" stroke="#62D6A5" stroke-width="3"/>
+</svg>

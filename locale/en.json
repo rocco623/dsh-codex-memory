@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Memory",
+    "description": "Carries distilled context from earlier sessions into new ones, Codex-style: one memory summary injected at session start, explicit notes applied at consolidation."
+  }
+}
