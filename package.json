@@ -3,6 +3,10 @@
   "version": "0.9.0",
   "description": "Codex's V2 memory pipeline for DeepSeek Harness: two-stage extraction, SQLite job table with lease and retry, git baseline diff gating, citation feedback.",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rocco623/dsh-codex-memory.git"
