@@ -23,6 +23,7 @@
 import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import z from '@deepseek-ai/schemastery'
 import { parseMemoryCitation } from './citations.js'
 import { openMemoryStore } from './db.js'
 import { buildConsolidationPrompt, buildReadPathInstructions, buildStageOneInput, stageOneSystemPrompt } from './prompts.js'
@@ -141,8 +142,44 @@ const truncateBytes = (text, maxBytes) => {
 export const name = 'dsh-codex-memory'
 export const inject = ['tools', 'agents']
 
+/**
+ * Fields the Plugins page renders. Every one is volatile, which is what makes
+ * it editable from the settings form; the Host resolves each to a live
+ * reference, so `apply` reads through one below instead of copying it.
+ */
+export const Config = z.object({
+  generateMemories: z.boolean().default(true).volatile().description('抽取新会话并写入记忆'),
+  useMemories: z.boolean().default(true).volatile().description('把记忆摘要注入新会话'),
+  disableOnExternalContext: z.boolean().default(true).volatile().description('用过 web/MCP 的会话不抽取'),
+  diagnostics: z.boolean().default(true).volatile().description('写 memories_v2/diagnostics.log'),
+
+  minRolloutIdleHours: z.number().default(6).volatile().description('会话空闲多少小时后才可抽取'),
+  maxRolloutAgeDays: z.number().default(10).volatile().description('超过多少天的会话不再抽取'),
+  maxRolloutsPerStartup: z.number().default(2).volatile().description('每次触发最多抽取几个会话'),
+  phase2SuccessCooldownSeconds: z.number().default(21_600).volatile().description('两次整合的最小间隔（秒）'),
+  maxUnusedDays: z.number().default(30).volatile().description('记忆条目多少天未被引用就淘汰'),
+
+  model: z.string().default('').volatile().description('子 agent 的模型；留空继承触发会话'),
+  provider: z.string().default('').volatile().description('子 agent 的 provider；留空继承触发会话'),
+  stage1ReasoningEffort: z.string().default('low').volatile().description('抽取阶段思考强度：off/low/high/max，留空继承'),
+  stage2ReasoningEffort: z.string().default('low').volatile().description('整合阶段思考强度：off/low/high/max，留空继承'),
+
+  concurrencyLimit: z.number().default(8).volatile().description('并行抽取的会话数'),
+  agentTimeoutMs: z.number().default(600_000).volatile().description('单个子 agent 的运行上限（毫秒）'),
+})
+
 export function apply(ctx, config = {}) {
-  const opts = { ...DEFAULTS, ...config }
+  const merged = { ...DEFAULTS, ...config }
+  // Volatile fields arrive as live references; read them on every access so an
+  // edit takes effect without reloading the plugin.
+  const opts = new Proxy(merged, {
+    get(target, key) {
+      const value = target[key]
+      return value !== null && typeof value === 'object' && typeof value.get === 'function'
+        ? value.get()
+        : value
+    },
+  })
   const home = dshHome()
   const sessionsRoot = join(home, 'sessions')
   // Codex keeps one state DB in codex_home and shares stage1_outputs across

@@ -79,7 +79,11 @@ dsh plugin --profile web add dsh-codex-memory
 
 依赖 `node:sqlite`（Node 22.5+ 内置）和系统 `git`。桌面端在 **设置 → 插件** 里装；那个 profile 归应用管，命令行改不了运行中的它。
 
-配置写进 profile 的 `cordis.patch.yml`：
+### 设置界面
+
+插件导出 `Config`（`@deepseek-ai/schemastery`，字段全标 `.volatile()`），宿主会据此在 **插件** 页给 `dsh-codex-memory` 生成配置表单：开关、抽取节奏、模型与思考强度、并发与超时都在里面改，改动写进 profile 的 `cordis.patch.yml`，不用手动编辑文件。
+
+不经过界面也可以直接写 profile 的 `cordis.patch.yml`：
 
 ```yaml
 - id: dsh-codex-memory
