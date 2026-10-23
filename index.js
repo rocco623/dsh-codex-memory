@@ -447,7 +447,7 @@ export function apply(ctx, config = {}) {
     const writeTool = {
       name: 'memory_write_summary',
       description:
-        'Write the consolidated memory artifacts. Call exactly once with the complete file contents.',
+        'Write the consolidated memory artifacts. Call exactly once with the complete file contents. Use this instead of the write tool: the memory root is outside the session sandbox.',
       parameters: {
         type: 'object',
         properties: {

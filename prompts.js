@@ -85,12 +85,17 @@ export function buildConsolidationPrompt({ memoryRoot, memoryExtensionsRoot, ext
   const primaryInputs = extensionsExist
     ? render(EXTENSIONS_PRIMARY_INPUTS, { memory_extensions_root: memoryExtensionsRoot })
     : ''
-  return render(template, {
+  return `${render(template, {
     memory_root: memoryRoot,
     memory_extensions_folder_structure: folderStructure,
     memory_extensions_primary_inputs: primaryInputs,
     phase2_workspace_diff_file: WORKSPACE_DIFF_FILENAME,
-  })
+  })}
+
+## Tooling
+
+The memory root is outside this session's writable sandbox, so \`write\` and \`edit\` cannot modify \`${memoryRoot}\`. Call \`memory_write_summary\` exactly once with the complete contents of \`memory_summary.md\` instead; the tool writes the file from the host process. Reading files and running shell commands under the memory root is allowed.
+`
 }
 
 /**
