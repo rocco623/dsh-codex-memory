@@ -90,13 +90,14 @@ const DEFAULTS = {
   // Empty means "inherit the creating agent's route"; a value overrides it.
   model: '',
   provider: '',
-  // Codex uses ReasoningEffort::Low for stage one and Medium for stage two.
-  // Inheriting the parent's effort is wrong here: a parent on "high" makes the
-  // consolidation child spend the whole turn reasoning and end it with no text
-  // and no tool call, which is exactly how "did not call memory_write_summary"
-  // happens. Set '' to inherit anyway; the loop rejects an unsupported effort.
+  // Codex uses ReasoningEffort::Low for stage one and Medium for stage two, but
+  // the DeepSeek adapter only accepts off/low/high/max, so `medium` is rejected
+  // before the request leaves. Inheriting is wrong too: a parent on "high" makes
+  // the consolidation child spend the whole turn reasoning and end it with no
+  // text and no tool call. Both stages therefore default to "low"; set '' to
+  // inherit, or another value the provider accepts.
   stage1ReasoningEffort: 'low',
-  stage2ReasoningEffort: 'medium',
+  stage2ReasoningEffort: 'low',
   // Writes memories_v2/diagnostics.log with the cause chain of agent failures.
   diagnostics: true,
 }

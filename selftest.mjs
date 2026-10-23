@@ -131,7 +131,7 @@ function makeCtx() {
         )
         assert.equal(
           options.agentOptions?.reasoningEffort,
-          options.sessionId.startsWith('memory-stage1') ? 'low' : 'medium',
+          'low',
           `agent ${options.sessionId} must use its stage's reasoning effort, not the parent's`,
         )
         assert.ok(options.meta, `agent ${options.sessionId} must be created with session meta`)
