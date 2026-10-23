@@ -53,6 +53,12 @@ const userMessage = (text) => ({
   source: { kind: SOURCE },
 })
 const ROLLOUT_SUMMARY_MAX_BYTES = 9_000
+// Codex collects this JSON through output_schema; DSH exposes no structured
+// output, so a tool carries it. The template still says "return exactly one
+// JSON object", which models satisfy with prose unless told otherwise.
+const STAGE1_TOOL_NOTE = `## Output delivery
+
+Do not print the JSON as text. Call \`memory_stage1_write_output\` exactly once with \`rollout_summary\` and \`rollout_slug\`; a reply that prints JSON without that call is discarded. The conversation is already rendered above — do not read session files or decode logs to find it.`
 // MEMORY_TOOL_DEVELOPER_INSTRUCTIONS_SUMMARY_TOKEN_LIMIT is 2,500 tokens; the
 // read path truncates the injected summary at that budget.
 const READ_PATH_SUMMARY_MAX_CHARS = 2_500 * 4
@@ -353,7 +359,9 @@ export function apply(ctx, config = {}) {
         rolloutGitBranch: null,
         rolloutContents: transcript,
       })
-      handle.agent.followup(userMessage(`${stageOneSystemPrompt()}\n\n${input}`))
+      handle.agent.followup(
+        userMessage(`${stageOneSystemPrompt()}\n\n${input}\n\n${STAGE1_TOOL_NOTE}`),
+      )
       await withTimeout(handle.agent.whenIdle(), opts.agentTimeoutMs)
     } finally {
       await handle.dispose?.()
