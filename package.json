@@ -40,7 +40,8 @@
     "templates/**",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "NOTICE"
   ],
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.5"

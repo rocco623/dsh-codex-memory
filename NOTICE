@@ -1,0 +1,9 @@
+dsh-codex-memory
+Copyright 2026 rocco623
+
+This product includes prompt templates derived from OpenAI Codex
+(https://github.com/openai/codex), Copyright OpenAI, licensed under the
+Apache License, Version 2.0.
+
+The files under templates/ are byte-identical to their Codex counterparts
+and are redistributed unmodified; prompts.js only substitutes placeholders.
