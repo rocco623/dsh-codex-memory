@@ -96,3 +96,9 @@ test('cancellation before dispatch never starts a model or writes a tool',{skip:
  await assert.rejects(driver.consolidate(plan,{system:'x',input:'y',workspace:{tools:[],dispatch(){assert.fail()}}},{signal:controller.signal}),/synthetic cancel/)
  assert.equal(m.requests.length,0)
 })
+test('failed stream close is not hidden by cancellation',{skip:!native},async()=>{
+ const m=mock([]),controller=new AbortController(),original=m.llm.prepareCall
+ m.llm.prepareCall=async(...args)=>({...await original(...args),stream(){return {[Symbol.asyncIterator](){return {async next(){controller.abort(new Error('synthetic cancel'));return {done:false,value:{type:'finish',reason:{kind:'stop'}}}},async return(){throw new Error('synthetic close failure')}}}}}})
+ const driver=createMemoryDriver(m.llm,native),plan=await driver.prepare(2,options,{provider:'p',model:'m'})
+ await assert.rejects(driver.consolidate(plan,{system:'x',input:'y',workspace:{tools:[]}},{signal:controller.signal}),e=>e.code==='MEMORY_STREAM_CLOSE_FAILED'&&e.cause?.message==='synthetic close failure')
+})

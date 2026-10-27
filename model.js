@@ -80,7 +80,12 @@ export function createMemoryDriver(llm,runtime){
    try{
     const assembler=new runtime.BlockAssembler();let ended=false
     const stream=prepared.stream({...prepared.config,system,messages:messages.map(runtime.freezeMessage),tools,signal:hooks.signal})
-    for await(const chunk of stream){check(hooks);assembler.push(chunk);if(chunk.type==='finish')ended=true}
+    const iterator=stream[Symbol.asyncIterator]();let consumed=false
+    try{
+     for(;;){check(hooks);const next=await iterator.next();if(next.done){consumed=true;break}check(hooks);assembler.push(next.value);if(next.value.type==='finish')ended=true}
+    }finally{
+     if(!consumed&&iterator.return)try{await iterator.return()}catch(cause){throw error('MEMORY_STREAM_CLOSE_FAILED',cause)}
+    }
     check(hooks)
     if(!ended)throw error('MEMORY_INCOMPLETE_RESPONSE')
     if(['error','aborted'].includes(assembler.finish.kind)){
@@ -91,6 +96,7 @@ export function createMemoryDriver(llm,runtime){
     if(!['stop','tool-calls'].includes(assembler.finish.kind))throw error('MEMORY_INCOMPLETE_RESPONSE',assembler.finish)
     return {message:assembler.message({provider:plan.config.provider,model:plan.config.model,...assembler.replayState===undefined?{}:{replayState:assembler.replayState}}),usage:assembler.usage}
    }catch(cause){
+    if(cause.code==='MEMORY_STREAM_CLOSE_FAILED')throw cause
     check(hooks)
     if(isOverflow(cause)||cause.code?.startsWith('MEMORY_'))throw cause
     const policy=prepared.retryPolicy,facts=cause.failure??cause
