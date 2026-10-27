@@ -94,7 +94,7 @@ export function buildConsolidationPrompt({ memoryRoot, memoryExtensionsRoot, ext
 
 ## Tooling
 
-The memory root is outside this session's writable sandbox, so \`write\` and \`edit\` cannot modify \`${memoryRoot}\`. Call \`memory_write_summary\` exactly once with the complete contents of \`memory_summary.md\` instead; the tool writes the file from the host process. Reading files and running shell commands under the memory root is allowed. End this turn with that call: do not spend the turn on analysis alone.
+Use only the declared \`memory_workspace_*\` tools. Paths are relative to \`${memoryRoot}\`; these tools can read and modify files inside that root, but cannot access original session logs or Git metadata. Shell, network, delegation, and other tools are unavailable. Write the resulting \`memory_summary.md\` through the workspace tools, then finish normally.
 `
 }
 
