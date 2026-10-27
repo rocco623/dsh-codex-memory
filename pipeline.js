@@ -1,4 +1,5 @@
 import * as fs from 'node:fs'
+import {randomUUID} from 'node:crypto'
 import {join,dirname,resolve} from 'node:path'
 import {openMemoryStore,JOB_KIND_STAGE1,JOB_KIND_PHASE2} from './db.js'
 import {createMemoryDriver} from './model.js'
@@ -111,6 +112,14 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
   return track(parent.sessionId,async signal=>{
    try{
     const opts=readOptions();signal.throwIfAborted();flushModes()
+    store.withControlMutation(()=>{
+     const root=assertMemoryRoot(memoryRoot,true),legacy=resolve(root,'diagnostics.log')
+     if(fs.lstatSync(legacy,{throwIfNoEntry:false})?.isFile()){
+      const destination=resolve(home,`memory_diagnostics.legacy-${randomUUID()}.log`)
+      if(dirname(legacy)!==root||dirname(destination)!==resolve(home))throw memoryError('InvalidPath','diagnostic archive escaped owner directory')
+      fs.renameSync(legacy,destination)
+     }
+    })
     try{await seedExtensionInstructions(memoryRoot,{ownedMutation:fn=>store.withControlMutation(fn),warn})}catch(error){signal.throwIfAborted();warn('extension seed failed',{error})}
     store.pruneStage1Outputs(opts.maxUnusedDays,opts.stage1PruneBatch)
     const sync=await bootstrap()

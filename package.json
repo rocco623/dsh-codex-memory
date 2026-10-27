@@ -17,7 +17,7 @@
     "memory"
   ],
   "engines": {
-    "node": ">=22.5"
+    "node": ">=24.21.0"
   },
   "type": "module",
   "exports": {
@@ -29,6 +29,13 @@
   "files": [
     "index.js",
     "client.js",
+    "config.js",
+    "pipeline.js",
+    "model.js",
+    "rollout-input.js",
+    "sources.js",
+    "memory-backend.js",
+    "private-workspace-tools.js",
     "db.js",
     "workspace.js",
     "storage.js",
@@ -43,6 +50,16 @@
     "icon.svg",
     "NOTICE"
   ],
+  "scripts": {
+    "test": "node selftest.mjs",
+    "check": "node check.mjs",
+    "verify:prompts": "node verify-prompts.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-format": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-format-v3-to-v4": "0.2.1-rc.3"
+  },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.5"
   },

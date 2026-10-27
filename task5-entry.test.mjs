@@ -52,6 +52,15 @@ test('native entry preserves absent defaults, gates schemas and rejects malforme
  assert.equal((await f.call('/config',{values:{...saved.values,useMemories:false}})).status,200);assert.equal(f.tools.size,0)
  assert.equal(f.streamCalls,0)
 })
+test('failed tool registration rolls back the whole set and allows retry',{skip:!target},async t=>{
+ const f=await fixture(t),initial=await f.call('/config'),register=f.ctx.tools.register
+ f.ctx.tools.register=tool=>{if(tool.name==='memory_note')throw Object.assign(new Error('synthetic collision'),{code:'DUPLICATE_TOOL'});return register(tool)}
+ assert.equal((await f.call('/config',{values:{...initial.values,dedicatedTools:true}})).status,400)
+ assert.equal(f.tools.size,0)
+ f.ctx.tools.register=register
+ assert.equal((await f.call('/config',{values:{...initial.values,dedicatedTools:true}})).status,200)
+ assert.equal(f.tools.size,5)
+})
 test('control API guards origin, JSON and confirmation; summary provider never appends user messages',{skip:!target},async t=>{
  const f=await fixture(t)
  assert.equal((await f.call('/config',{}, {origin:'http://untrusted.invalid'})).status,403)

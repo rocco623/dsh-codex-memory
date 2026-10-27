@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtempSync,rmSync,readFileSync,writeFileSync,existsSync,mkdirSync,symlinkSync,utimesSync} from 'node:fs'
+import {mkdtempSync,rmSync,readFileSync,writeFileSync,existsSync,mkdirSync,symlinkSync,utimesSync,readdirSync} from 'node:fs'
 import {join,resolve,dirname,basename} from 'node:path'
 import {tmpdir} from 'node:os'
 import {createRequire} from 'node:module'
@@ -53,10 +53,14 @@ function model(replies){
 const final=[{type:'text-delta',index:0,text:'done'},{type:'finish',reason:{kind:'stop'}}]
 const summaryCall=[{type:'block-end',index:0,block:{type:'tool-call',id:'synthetic-write',name:'memory_workspace_write',arguments:JSON.stringify({path:'memory_summary.md',content:valid})}},{type:'finish',reason:{kind:'tool-calls'}}]
 test('whole consolidation publishes one baseline and runs again in the same session without re-sampling unchanged files',{skip:!native},async t=>{
- const llm=model([summaryCall,final]),{pipeline,messages}=fixture(t,{llm})
+ const llm=model([summaryCall,final]),{pipeline,messages,home}=fixture(t,{llm})
+ mkdirSync(pipeline.memoryRoot);writeFileSync(join(pipeline.memoryRoot,'diagnostics.log'),'synthetic private diagnostics')
  await pipeline.run({sessionId:'current',route:{provider:'synthetic',model:'synthetic'}})
  assert.equal(readFileSync(join(pipeline.memoryRoot,'memory_summary.md'),'utf8'),valid,JSON.stringify(messages))
  assert.equal(pipeline.status().jobs[0].status,'done');assert.equal(pipeline.status().progress.max_thread_count,0)
+ assert.equal(existsSync(join(pipeline.memoryRoot,'diagnostics.log')),false)
+ const archived=readdirSync(home).find(name=>name.startsWith('memory_diagnostics.legacy-'))
+ assert.ok(archived);assert.equal(readFileSync(join(home,archived),'utf8'),'synthetic private diagnostics')
  await pipeline.run({sessionId:'current',route:{provider:'synthetic',model:'synthetic'}})
  assert.equal(llm.requests.length,2,JSON.stringify(messages));assert.equal(pipeline.status().jobs[0].status,'done')
 })

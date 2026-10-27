@@ -1,20 +1,9 @@
-// Read-only check of sessions.js against real ~/.dsh/sessions data.
-// Does not touch DSH_HOME; only reads and renders.
-import { readThreadCandidates, renderSessionTranscript, dshHome } from './sessions.js'
-import { join } from 'node:path'
-
-const sessionsRoot = join(dshHome(), 'sessions')
-const candidates = await readThreadCandidates(sessionsRoot)
-console.log(`found ${candidates.length} root-thread candidates`)
-
-let withTurns = 0
-let maxLen = 0
-for (const c of candidates) {
-  const text = renderSessionTranscript(c.events)
-  if (text.trim()) withTurns += 1
-  maxLen = Math.max(maxLen, text.length)
-  if (text.includes('undefined') && !text.includes('`undefined`') === false) {
-    // allow "undefined" as genuine conversation content; just report count
-  }
+import {spawnSync} from 'node:child_process'
+import {readdirSync} from 'node:fs'
+import {fileURLToPath} from 'node:url'
+const cwd=fileURLToPath(new URL('.',import.meta.url))
+for(const file of readdirSync(cwd).filter(name=>/\.(?:js|mjs)$/.test(name))){
+ const result=spawnSync(process.execPath,['--check',file],{cwd,stdio:'inherit'})
+ if(result.error)throw new Error('syntax checker failed',{cause:result.error})
+ if(result.status!==0)process.exit(result.status??1)
 }
-console.log(`ok: ${withTurns}/${candidates.length} candidates render with turns, max rendered length ${maxLen} chars`)

@@ -1,7 +1,7 @@
-// Proves the shipped prompts are the Codex originals after placeholder
-// substitution: every non-placeholder line must survive render() unchanged, and
-// every placeholder must be consumed. Run against the plugin's own templates/.
+// Template hashes are pinned to Codex c260087efe8cc6dcc0526e7018ae9e0e3fc134e3.
+// The hashes were independently checked against that revision's Git blob IDs.
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +17,16 @@ const DIR = join(dirname(fileURLToPath(import.meta.url)), 'templates')
 const read = (p) => readFileSync(join(DIR, p), 'utf8')
 const NO_PLACEHOLDER = /\{\{\s*[a-z_][a-z0-9_]*\s*\}\}/
 
+const hashes = {
+ 'memories/stage_one_system_v2.md':'334c0d51a2c63bd317dac074155fb3ecf0a56af8b00657736bab9c74222372b4',
+ 'memories/stage_one_input_v2.md':'8fd4bb25fe6bd746b2d46ad841ac3a195d220c3da0cb9230615e2347c6ef853e',
+ 'memories/consolidation_v2.md':'7334fdb4aa5d958bcff54568a375d0b0145c19a611a1a22faa6bf251a46a5f0e',
+ 'memories/read_path_v2.md':'2f81fa2e89f341a1b7b3cf11ee7b855087c4ab84ddad920980475465ef28ff27',
+ 'extensions/ad_hoc/instructions.md':'d36a36083d92f9d44efbd95e0e4b6e81d7d149e812f2bca2009b6dd4b8aa93e7',
+ 'compact/prompt.md':'ab0c334d4faca17e3afbb9b16967c1b2fdcc7242a9a0880af57949fa236d6d07',
+ 'compact/summary_prefix.md':'e9b088e794a6bb9082ac053fcc760bd818d7e720ee4bcdc72c6e480de7b7cb0e',
+}
+for(const [file,hash] of Object.entries(hashes))assert.equal(createHash('sha256').update(readFileSync(join(DIR,file))).digest('hex'),hash,`upstream template changed: ${file}`)
 const cases = []
 
 assert.equal(stageOneSystemPrompt(), read('memories/stage_one_system_v2.md'), 'system prompt must be byte-identical')

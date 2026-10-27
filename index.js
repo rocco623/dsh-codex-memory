@@ -63,16 +63,19 @@ export function apply(ctx,config={}){
   {name:'memory_add_ad_hoc_note',description:'Record an explicit remember, forget, or correction request. Never infer permission.',parameters:object({filename:{type:'string'},note:{type:'string'}},['filename','note']),execute:args=>pipeline.backend.addAdHocNote(args)},
   {name:'memory_note',description:'Record an explicit user memory request; applied at consolidation.',parameters:object({note:{type:'string'}},['note']),execute:args=>pipeline.backend.note(args)},
  ]
- let registered=[],enabled=false
+ let registered=[]
  function synchronizeTools(){
   const next=options().useMemories&&options().dedicatedTools
-  if(next===enabled)return
+  if(next===Boolean(registered.length))return
   for(const dispose of registered)dispose()
-  registered=[];enabled=next
-  if(next)for(const tool of tools)registered.push(ctx.tools.register({...tool,output,execute:args=>{
-   if(!options().useMemories||!options().dedicatedTools||pipeline.store.control().reset_pending)throw memoryError('memory_disabled','memory tools are disabled')
-   try{return tool.execute(args)}catch(error){report('warn','memory tool failed',{error,tool:tool.name});throw error}
-  }}))
+  registered=[]
+  if(!next)return
+  try{
+   for(const tool of tools)registered.push(ctx.tools.register({...tool,output,execute:args=>{
+    if(!options().useMemories||!options().dedicatedTools||pipeline.store.control().reset_pending)throw memoryError('memory_disabled','memory tools are disabled')
+    try{return tool.execute(args)}catch(error){report('warn','memory tool failed',{error,tool:tool.name});throw error}
+   }}))
+  }catch(error){for(const dispose of registered)dispose();registered=[];throw error}
  }
  synchronizeTools()
  ctx.on('loader/volatile-update',synchronizeTools)
