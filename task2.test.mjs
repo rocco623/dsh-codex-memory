@@ -86,10 +86,11 @@ test('pollution is persistent and explicit enable ignores previously processed e
 test('retention never re-extracts the same successful source and max count is monotonic',t=>{
  const {a,source,tick}=fixture(t);a.publishSources([source('a')])
  const job=a.claimStage1Job('a','w',100,30,2,'v1');a.stage1JobSucceeded('a',job.token,{sourceUpdatedAt:100,rolloutSummary:'summary'},'v1')
+ const selected=a.getPhase2InputSelection(256,30)
  tick(60*86400);assert.equal(a.pruneStage1Outputs(30,200),1);assert.equal(a.stage1NeedsUpdate('a',100),false)
- const p=a.tryClaimGlobalPhase2Job('w',30,0);assert.equal(a.phase2JobSucceeded(p.token,p.watermark,[],256),true)
- const q=a.tryClaimGlobalPhase2Job('w',30,0);assert.equal(a.phase2JobSucceeded(q.token,q.watermark,[],1),true)
- assert.equal(a.getProgress().max_thread_count,256)
+ const p=a.tryClaimGlobalPhase2Job('w',30,0);assert.equal(a.phase2JobSucceeded(p.token,p.watermark,selected),true)
+ const q=a.tryClaimGlobalPhase2Job('w',30,0);assert.equal(a.phase2JobSucceeded(q.token,q.watermark,[]),true)
+ assert.equal(a.getProgress().max_thread_count,1)
 })
 test('complete catalog is not truncated by the 5000-source claim scan limit',t=>{
  const {a,source}=fixture(t)

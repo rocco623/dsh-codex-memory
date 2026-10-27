@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS source_catalog (
  source_updated_at_ms INTEGER NOT NULL DEFAULT 0,source_version TEXT,last_complete_sync_id INTEGER,
  memory_mode TEXT NOT NULL DEFAULT 'enabled',mode_origin TEXT NOT NULL DEFAULT 'legacy_default',mode_version INTEGER NOT NULL DEFAULT 0,
  disable_external INTEGER,mode_event_seq INTEGER NOT NULL DEFAULT -1,last_error TEXT,header_json TEXT,snapshot_json TEXT);
+CREATE TABLE IF NOT EXISTS citation_messages(session_id TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(session_id,message_id));
 `
 export function openMemoryStore(path,{clock=()=>Math.floor(Date.now()/1000)}={}) {
  mkdirSync(dirname(path),{recursive:true})
@@ -76,6 +77,7 @@ class MemoryStore {
    this.run(`INSERT OR IGNORE INTO source_catalog(session_id,created_at_ms,cwd,parent_id,origin,delegation_depth,memory_mode,mode_origin,disable_external,header_json)
     VALUES(?,?,?,?,?,?,?,?,?,?)`,header.id,header.createdAt??0,header.cwd,header.parentSession,header.origin,header.delegationDepth??0,
     fresh&&!generateMemories?'disabled':'enabled',fresh?'creation':'legacy_default',fresh?disableOnExternalContext:null,JSON.stringify(header))
+   if(fresh)this.run("UPDATE source_catalog SET memory_mode=?,mode_origin='creation',disable_external=? WHERE session_id=? AND mode_origin='legacy_default' AND mode_version=0",generateMemories?'enabled':'disabled',disableOnExternalContext,header.id)
    return this.getSource(header.id)
   })
  }
@@ -177,6 +179,10 @@ class MemoryStore {
    retry_at=CASE WHEN jobs.status='running' THEN jobs.retry_at ELSE NULL END,retry_remaining=MAX(jobs.retry_remaining,3),
    input_watermark=CASE WHEN excluded.input_watermark>COALESCE(jobs.input_watermark,0) THEN excluded.input_watermark ELSE COALESCE(jobs.input_watermark,0)+1 END`,JOB_KIND_PHASE2,PHASE2_JOB_KEY,watermark)
  }
+ recordCitationUsage(sessionId,messageId,ids){return this.atomic(()=>{
+  if(!this.run('INSERT OR IGNORE INTO citation_messages VALUES(?,?)',sessionId,messageId).changes)return 0
+  return this.recordStage1OutputUsage(ids.filter(id=>this.getSource(id)))
+ })}
  recordStage1OutputUsage(ids){return this.atomic(()=>{let n=0;for(const id of new Set(ids))n+=this.run('UPDATE stage1_outputs SET usage_count=COALESCE(usage_count,0)+1,last_usage=? WHERE thread_id=?',this.clock(),id).changes;return n})}
  getPhase2InputSelection(limit,days){
   return this.all(`SELECT so.*,s.cwd,s.physical_path AS rollout_path,s.git_branch FROM stage1_outputs so JOIN source_catalog s ON s.session_id=so.thread_id
@@ -202,6 +208,7 @@ class MemoryStore {
  assertPhase2Ownership(token,generation){
   const control=this.control()
   if(control.reset_pending)fail('reset_pending')
+  if(!control.catalog_ready)fail('catalog_uncertain')
   const job=this.get("SELECT * FROM jobs WHERE kind=? AND job_key=? AND status='running' AND ownership_token=?",JOB_KIND_PHASE2,PHASE2_JOB_KEY,token)
   if(!job||job.generation!==control.generation||generation!==control.generation||job.lease_until<=this.clock())fail('lost_ownership')
   return job
@@ -212,14 +219,14 @@ class MemoryStore {
   const state=this.control();if(state.reset_pending)return false
   return this.run("UPDATE jobs SET lease_until=? WHERE kind=? AND job_key=? AND status='running' AND ownership_token=? AND generation=? AND lease_until>?",this.clock()+Math.max(0,lease),JOB_KIND_PHASE2,PHASE2_JOB_KEY,token,state.generation,this.clock()).changes>0
  })}
- phase2JobSucceeded(token,watermark,selected,maxThreadCount=selected.length){return this.atomic(()=>{
+ phase2JobSucceeded(token,watermark,selected){return this.atomic(()=>{
   const generation=this.control().generation
   try{this.assertPhase2Ownership(token,generation)}catch(error){if(['lost_ownership','reset_pending'].includes(error.code))return false;throw error}
   if(!this.control().catalog_ready)return false
   this.run("UPDATE jobs SET status='done',finished_at=?,lease_until=NULL,last_error=NULL,last_success_watermark=MAX(COALESCE(last_success_watermark,0),?) WHERE kind=? AND job_key=? AND ownership_token=?",this.clock(),watermark,JOB_KIND_PHASE2,PHASE2_JOB_KEY,token)
   this.run('UPDATE stage1_outputs SET selected_for_phase2=0,selected_for_phase2_source_updated_at=NULL')
   for(const row of selected)this.run('UPDATE stage1_outputs SET selected_for_phase2=1,selected_for_phase2_source_updated_at=? WHERE thread_id=? AND source_updated_at=?',row.source_updated_at,row.thread_id,row.source_updated_at)
-  this.run('UPDATE consolidation_progress SET max_thread_count=MAX(max_thread_count,?) WHERE singleton=1',maxThreadCount)
+  this.run('UPDATE consolidation_progress SET max_thread_count=MAX(max_thread_count,?) WHERE singleton=1',selected.length)
   return true
  })}
  phase2JobFailed(token,reason,delay){return this.run("UPDATE jobs SET status='error',finished_at=?,lease_until=NULL,retry_at=?,retry_remaining=MAX(retry_remaining-1,0),last_error=? WHERE kind=? AND job_key=? AND status='running' AND ownership_token=?",this.clock(),this.clock()+Math.max(0,delay),reason,JOB_KIND_PHASE2,PHASE2_JOB_KEY,token).changes>0}

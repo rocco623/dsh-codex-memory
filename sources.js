@@ -92,7 +92,7 @@ export async function syncSourceCatalog(ctx,store,{parseFilename,signal,warn}={}
   const absent=store.listSources().some(x=>!seen.has(x.session_id)&&x.presence!=='missing')
   // A remote/live-only corpus can prove presence, but not physical absence.
   const absenceSafe=physical.complete||!absent&&rows.every(x=>x.presence==='present'&&x.read_status!=='conflict')
-  return store.publishSources(rows,{complete:true,absenceSafe,liveIds:records.filter(x=>x.live).map(x=>x.header.id),backendIdentity:root??'nonlocal'})
+  return store.publishSources(rows,{complete:true,absenceSafe,liveIds:[...new Set([...records.filter(x=>x.live).map(x=>x.header.id),...store.listSources().filter(x=>ctx.sessions?.get(x.session_id)).map(x=>x.session_id)])],backendIdentity:root??'nonlocal'})
  }catch(error){signal?.throwIfAborted();store.publishSources([],{complete:false,absenceSafe:false});warn?.('source catalog sync failed',{error});return {certain:false,error}}
 }
 export async function validateSourceSnapshot(ctx,snapshot,{parseFilename,signal}={}){
