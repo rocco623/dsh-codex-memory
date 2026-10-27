@@ -63,7 +63,11 @@ memory_diagnostics.legacy-*.log  保留的历史诊断归档
 
 设置页提供状态、来源模式和清空 V2 操作。清空要求显式确认；存在未过期作业租约时返回 busy，不清数据库或文件。文件清理失败会保留 reset-pending，阻止新作业，供后续重试。成功清空保留原始会话、来源模式及引用防重放事实，不主动重抽历史。已注入现有会话的文本不在清理范围内。
 
-控制端点位于 `/dsh-codex-memory`：`config`、`capabilities`、`status`、`threads`、`thread-mode`、`reset`。修改请求要求 JSON；带 Origin 的请求必须同源。访问控制由宿主 Web Server 承担，错误响应不回传内部错误原文。
+控制端点位于 `/dsh-codex-memory`：`config`、`capabilities`、`status`、`threads`、`thread-mode`、`reset`。配置返回两阶段的 `validation`（ready/runtime/blocked）；继承 route 在首次触发前标为 runtime，之后使用最近触发会话的实际 route 做只读元数据预检，不进行模型采样。状态还返回来源/输出/运行与失败作业计数、摘要有效性和进度，设置页显示这些结果。
+
+模式请求使用 `{thread_id,mode}`；保留既有 `sessionId` 别名，但两者不可同时提供。reset 存在有效租约时返回 HTTP 409。修改请求要求 JSON；带 Origin 的请求必须同源。访问控制由宿主 Web Server 承担，错误响应不回传内部错误原文。
+
+Node 计时上限在保存前校验：作业超时不超过2,147,483,647毫秒，心跳周期不超过2,147,483秒，防止溢出为1毫秒或在领取后抛错。PTC 的实际Web/MCP派发事件同样触发已固化的污染策略；中断助手消息仍保留为抽取证据，但不回流引用使用计数。
 
 ## 验证
 

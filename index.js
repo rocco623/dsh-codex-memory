@@ -104,13 +104,13 @@ export function apply(ctx,config={}){
     try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch(cause){throw memoryError('INVALID_JSON','invalid JSON',cause)}
     if(!body||typeof body!=='object'||Array.isArray(body))throw memoryError('INVALID_JSON','object required')
    }
-   if(path==='/config'&&req.method==='GET')return send(200,{ok:true,values:options(),origins:configOrigins(raw())})
+   if(path==='/config'&&req.method==='GET')return send(200,{ok:true,values:options(),origins:configOrigins(raw()),validation:await pipeline.readiness()})
    if(path==='/config'&&req.method==='POST'){
     strictFields(body,['values']);const next=await validateSettings(body.values)
     const entry=ctx.fiber?.entry,editor=ctx.get('configEditor')
     if(!entry||!editor)return send(409,{ok:false,error:'NO_CONFIG_EDITOR'})
     await editor.edit(entry,()=>({...next,memoryConfigVersion:2}));synchronizeTools()
-    return send(200,{ok:true,values:options(),origins:configOrigins(raw())})
+    return send(200,{ok:true,values:options(),origins:configOrigins(raw()),validation:await pipeline.readiness()})
    }
    if(path==='/capabilities'&&req.method==='GET'){
     const provider=url.searchParams.get('provider'),model=url.searchParams.get('model')
@@ -118,7 +118,7 @@ export function apply(ctx,config={}){
     const info=await ctx.llm.resolveModelInfo(provider,model)
     return send(200,{ok:true,provider,model,context:info.context??null,reasoning:info.reasoning??null})
    }
-   if(path==='/status'&&req.method==='GET')return send(200,{ok:true,...pipeline.status(),root:pipeline.memoryRoot})
+   if(path==='/status'&&req.method==='GET')return send(200,{ok:true,...pipeline.status(),root:pipeline.memoryRoot,validation:await pipeline.readiness()})
    if(path==='/threads'&&req.method==='GET'){
     await pipeline.bootstrap()
     const offset=Number(url.searchParams.get('cursor')??0)
@@ -127,15 +127,17 @@ export function apply(ctx,config={}){
     return send(200,{ok:true,items,nextCursor:offset+items.length<all.length?String(offset+items.length):null})
    }
    if(path==='/thread-mode'&&req.method==='POST'){
-    strictFields(body,['sessionId','mode'])
-    if(typeof body.sessionId!=='string'||!['enabled','disabled'].includes(body.mode))throw memoryError('InvalidArgument','invalid session mode')
-    if(!pipeline.store.getSource(body.sessionId))return send(404,{ok:false,error:'UNKNOWN_SESSION'})
+    strictFields(body,['thread_id','sessionId','mode'])
+    if(Object.hasOwn(body,'thread_id')&&Object.hasOwn(body,'sessionId'))throw memoryError('InvalidArgument','ambiguous session identity')
+    const id=body.thread_id??body.sessionId
+    if(typeof id!=='string'||!['enabled','disabled'].includes(body.mode))throw memoryError('InvalidArgument','invalid session mode')
+    if(!pipeline.store.getSource(id))return send(404,{ok:false,error:'UNKNOWN_SESSION'})
     let cursor
     if(body.mode==='enabled'){
-     const lease=await ctx.sessionQuery.observeSession(body.sessionId,{projectionMode:'none'})
+     const lease=await ctx.sessionQuery.observeSession(id,{projectionMode:'none'})
      try{cursor=lease.cursor}finally{lease[Symbol.dispose]()}
     }
-    pipeline.store.setSourceMode(body.sessionId,body.mode,{eventSeq:cursor})
+    pipeline.store.setSourceMode(id,body.mode,{eventSeq:cursor})
     return send(200,{ok:true})
    }
    if(path==='/reset'&&req.method==='POST'){
@@ -144,7 +146,7 @@ export function apply(ctx,config={}){
    return send(404,{ok:false,error:'NOT_FOUND'})
   }catch(error){
    report('warn','control request failed',{error})
-   const code=codeOf(error),status=code==='reset_busy'||code==='reset_pending'?409:code==='BODY_TOO_LARGE'?413:code==='INTERNAL_ERROR'?500:400
+   const code=codeOf(error),status=code==='busy'||code==='reset_busy'||code==='reset_pending'?409:code==='BODY_TOO_LARGE'?413:code==='INTERNAL_ERROR'?500:400
    return send(status,{ok:false,error:code})
   }
  }}),'memory: settings and control routes'))

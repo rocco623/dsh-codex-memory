@@ -11,7 +11,7 @@ function mock(replies){
  const llm={async prepareCall(config,signal,configure){preparations++;signal?.throwIfAborted();const info={context:{contextWindow:100000},reasoning:{efforts:['off','low','high'],defaultEffort:'low'}}
   const proposed=configure?{...config,...configure({},info)}:config
   if(proposed.reasoningEffort&&!info.reasoning.efforts.includes(proposed.reasoningEffort))throw new native.LlmError('unsupported effort','INVALID_REASONING')
-  return {config:proposed,context:info.context,retryPolicy:{mode:'normal',maxRetries:0,retryableCodes:['TRANSPORT'],initialDelayMs:1,maxDelayMs:1,jitterRatio:0},stream(request){requests.push(request);return (async function*(){const next=replies.shift();if(next instanceof Error)throw next;yield* next})()}}
+  return {config:proposed,context:info.context,retryPolicy:{mode:'normal',maxRetries:0,retryableCodes:['TRANSPORT'],initialDelayMs:1,maxDelayMs:1,jitterRatio:0},stream(request){requests.push(request);return (async function*(){const next=replies.shift();if(next instanceof native.LlmError){yield {type:'finish',reason:{kind:'error',failure:{code:next.code,message:next.message}}};return}if(next instanceof Error)throw next;yield* next})()}}
  }}
  return {llm,requests,get preparations(){return preparations}}
 }
@@ -95,6 +95,19 @@ test('cancellation before dispatch never starts a model or writes a tool',{skip:
  const plan=await driver.prepare(2,options,{provider:'p',model:'m'});controller.abort(new Error('synthetic cancel'))
  await assert.rejects(driver.consolidate(plan,{system:'x',input:'y',workspace:{tools:[],dispatch(){assert.fail()}}},{signal:controller.signal}),/synthetic cancel/)
  assert.equal(m.requests.length,0)
+})
+test('timer settings reject delays that overflow Node timers before any claim',()=>{
+ assert.equal(normalizeOptions({agentTimeoutMs:2147483647,phase2HeartbeatSeconds:2147483}).agentTimeoutMs,2147483647)
+ for(const values of [{agentTimeoutMs:2147483648},{agentTimeoutMs:4294967296},{phase2HeartbeatSeconds:2147484}])assert.throws(()=>normalizeOptions(values),e=>e.code==='INVALID_LIFECYCLE_LIMIT')
+})
+test('thrown middleware failures never use provider retries or overflow compaction',{skip:!native},async()=>{
+ for(const failure of [new Error('synthetic middleware'),new native.LlmError('synthetic middleware overflow','CONTEXT_WINDOW_EXCEEDED')]){
+  const m=mock([failure,text('must not retry')]),original=m.llm.prepareCall
+  m.llm.prepareCall=async(...args)=>({...await original(...args),retryPolicy:{mode:'always',initialDelayMs:1,maxDelayMs:1,jitterRatio:0},stream(request){m.requests.push(request);return(async function*(){throw failure})()}})
+  const driver=createMemoryDriver(m.llm,native)
+  await assert.rejects(driver.consolidate(await driver.prepare(2,options,{provider:'p',model:'m'}),{system:'isolated',input:'job',workspace:{tools:[]}}),e=>e===failure)
+  assert.equal(m.requests.length,1)
+ }
 })
 test('failed stream close is not hidden by cancellation',{skip:!native},async()=>{
  const m=mock([]),controller=new AbortController(),original=m.llm.prepareCall

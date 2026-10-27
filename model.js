@@ -61,7 +61,8 @@ export function buildCompactedHistory(history,summary,runtime){
 }
 export function createMemoryDriver(llm,runtime){
  const check=hooks=>{hooks.signal?.throwIfAborted();hooks.assertOwnership?.()}
- const isOverflow=cause=>(cause.failure?.code??cause.code)===runtime.CONTEXT_WINDOW_EXCEEDED_CODE
+ class RequestFailure extends runtime.LlmError {}
+ const isOverflow=cause=>cause instanceof RequestFailure&&cause.code===runtime.CONTEXT_WINDOW_EXCEEDED_CODE
  async function bind(config,signal){
   let info
   const prepared=await llm.prepareCall(config,signal,(controls,metadata)=>{info=metadata;return {...controls,...config}})
@@ -91,14 +92,14 @@ export function createMemoryDriver(llm,runtime){
     if(['error','aborted'].includes(assembler.finish.kind)){
      const facts=assembler.finish.failure
      if(!facts)throw error('MEMORY_INVALID_FINISH')
-     throw new runtime.LlmError(facts.message,facts.code,facts)
+     throw new RequestFailure(facts.message,facts.code,facts)
     }
     if(!['stop','tool-calls'].includes(assembler.finish.kind))throw error('MEMORY_INCOMPLETE_RESPONSE',assembler.finish)
     return {message:assembler.message({provider:plan.config.provider,model:plan.config.model,...assembler.replayState===undefined?{}:{replayState:assembler.replayState}}),usage:assembler.usage}
    }catch(cause){
     if(cause.code==='MEMORY_STREAM_CLOSE_FAILED')throw cause
     check(hooks)
-    if(isOverflow(cause)||cause.code?.startsWith('MEMORY_'))throw cause
+    if(!(cause instanceof RequestFailure)||isOverflow(cause))throw cause
     const policy=prepared.retryPolicy,facts=cause.failure??cause
     if(!policy||policy.mode!=='always'&&(!policy.retryableCodes.includes(facts.code)||retry>=policy.maxRetries))throw cause
     retry++

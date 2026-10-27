@@ -3,20 +3,21 @@ import {randomUUID} from 'node:crypto'
 import {join,dirname,resolve} from 'node:path'
 import {openMemoryStore,JOB_KIND_STAGE1,JOB_KIND_PHASE2} from './db.js'
 import {createMemoryDriver} from './model.js'
+import {stageRoute} from './config.js'
 import {syncSourceCatalog,validateSourceSnapshot} from './sources.js'
 import {readEvidenceSnapshot,usesExternalContext} from './sessions.js'
 import {parseMemoryCitation} from './citations.js'
 import {createMemoryBackend,assertMemoryRoot,memoryError} from './memory-backend.js'
 import {createPrivateWorkspaceTools} from './private-workspace-tools.js'
 import {seedExtensionInstructions,syncRolloutSummariesFromMemories,pruneOldExtensionResources} from './storage.js'
-import {prepareMemoryWorkspace,memoryWorkspaceDiff,writeWorkspaceDiff,validateConsolidationArtifacts,resetMemoryWorkspaceBaseline} from './workspace.js'
+import {prepareMemoryWorkspace,memoryWorkspaceDiff,writeWorkspaceDiff,validateConsolidationArtifacts,resetMemoryWorkspaceBaseline,isValidV2Summary} from './workspace.js'
 import {buildConsolidationPrompt} from './prompts.js'
 
 export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFilename,report=(level,event,detail)=>ctx.logger[level]('memory '+event,detail)}){
  if(!home)throw new TypeError('memory home is required')
  const store=openMemoryStore(join(home,'memory_state.db')),memoryRoot=join(home,'memories_v2')
  const driver=createMemoryDriver(ctx.llm,runtime),lifetime=new AbortController(),active=new Map(),turns=new WeakMap()
- let incompleteShutdown=false,stopping
+ let incompleteShutdown=false,stopping,lastRoute
  const pendingModes=new Map(),bootstrapKey=Symbol('bootstrap')
  const warn=(event,detail)=>report('warn',event,detail)
  const guard=()=>lifetime.signal.throwIfAborted()
@@ -61,7 +62,9 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
   if(failures.length)throw new AggregateError(failures,'memory extraction workers failed',{cause:failures[0]})
  }
  async function stage2(parent,signal,opts){
-  if(!store.control().catalog_ready)return
+  const pending=active.get(bootstrapKey);if(pending)await pending.promise
+  const sync=await bootstrap();signal.throwIfAborted()
+  if(sync.error||!store.control().catalog_ready)return
   let plan
   try{plan=await driver.prepare(2,opts,parent.route,signal)}catch(error){warn('stage2 configuration unavailable',{error});return}
   signal.throwIfAborted()
@@ -109,6 +112,7 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
  }
  function flushModes(){for(const [id,{header,options}]of pendingModes){store.initializeSource(header,options);store.run("UPDATE source_catalog SET presence='present',live=1 WHERE session_id=?",id);pendingModes.delete(id)}}
  function run(parent){
+  const {provider,model,reasoningEffort}=parent.route??{};lastRoute={provider,model,reasoningEffort}
   return track(parent.sessionId,async signal=>{
    try{
     const opts=readOptions();signal.throwIfAborted();flushModes()
@@ -141,7 +145,7 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
  function handleEvent(session,event){
   if(lifetime.signal.aborted)return
   if(usesExternalContext([event]))store.markPolluted(session.id,event.seq)
-  if(event.type==='assistant/message'&&event.data.message?.id){
+  if(event.type==='assistant/message'&&!event.data.interrupted&&event.data.message?.id){
    const text=event.data.message.content.filter(b=>b.type==='text').map(b=>b.text).join('\n'),citation=parseMemoryCitation([text])
    if(citation)store.recordCitationUsage(session.id,event.data.message.id,citation.rolloutIds)
   }
@@ -178,7 +182,33 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
  function bootstrap(){return track(bootstrapKey,async signal=>{try{flushModes();return await syncSourceCatalog(ctx,store,{parseFilename,signal,warn})}catch(error){if(!signal.aborted)warn('catalog bootstrap failed',{error});return {certain:false,error}}})}
  async function whenIdle(){while(active.size)await Promise.allSettled([...active.values()].map(x=>x.promise))}
  const backend=createMemoryBackend(memoryRoot,{ownedMutation:fn=>{guard();return store.withControlMutation(fn)}})
- return {store,memoryRoot,driver,backend,run,handleCreated,handleEvent,reset,stop,
-  bootstrap,whenIdle,
-  status:()=>({control:store.control(),progress:store.getProgress(),running:active.size,jobs:store.all('SELECT kind,job_key,status,lease_until,retry_at,retry_remaining,last_error FROM jobs ORDER BY kind,job_key')})}
+ function readiness(){return track(Symbol('readiness'),async signal=>{
+  const options=readOptions(),parent={...lastRoute},validation={}
+  for(const stage of [1,2]){
+   signal.throwIfAborted()
+   try{
+    stageRoute(options,stage,parent)
+    const plan=await driver.prepare(stage,options,parent,signal);signal.throwIfAborted()
+    const {provider,model,reasoningEffort}=plan.config
+    validation['stage'+stage]={state:'ready',provider,model,reasoningEffort:reasoningEffort??null,contextWindow:plan.info?.context?.contextWindow??null}
+   }catch(error){
+    signal.throwIfAborted()
+    const code=typeof error.code==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(error.code)?error.code:'INTERNAL_ERROR'
+    validation['stage'+stage]={state:code==='NO_TRIGGER_ROUTE'?'runtime':'blocked',code}
+   }
+  }
+  return validation
+ })}
+ function status(){
+  guard()
+  const options=readOptions(),control=store.control(),progress=store.getProgress(),jobs=store.all('SELECT kind,job_key,status,lease_until,retry_at,retry_remaining,last_error FROM jobs ORDER BY kind,job_key')
+  const sources={total:store.get('SELECT COUNT(*) AS n FROM source_catalog').n,enabled:0,disabled:0,polluted:0,present:0,missing:0,unknown:0}
+  for(const row of store.all('SELECT memory_mode,COUNT(*) AS n FROM source_catalog GROUP BY memory_mode'))sources[row.memory_mode]=row.n
+  for(const row of store.all('SELECT presence,COUNT(*) AS n FROM source_catalog GROUP BY presence'))sources[row.presence]=row.n
+  let summary_valid=false
+  try{summary_valid=isValidV2Summary(backend.read({path:'memory_summary.md'}).content)}catch(error){if(!['NotFound','ENOENT'].includes(error.code))warn('summary readiness failed',{error})}
+  const running_jobs=jobs.filter(job=>job.status==='running'&&job.lease_until>store.clock()).length,failed_jobs=jobs.filter(job=>job.status==='error').length
+  return {control,progress,jobs,sources,summary_valid,stage1_count:store.get('SELECT COUNT(*) AS n FROM stage1_outputs').n,running:running_jobs,running_jobs,failed_jobs,max_consolidated_thread_count:progress.max_thread_count,generateMemories:options.generateMemories,useMemories:options.useMemories,dedicatedTools:options.dedicatedTools}
+ }
+ return {store,memoryRoot,driver,backend,run,handleCreated,handleEvent,reset,stop,bootstrap,whenIdle,readiness,status}
 }

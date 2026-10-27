@@ -239,7 +239,7 @@ export async function readEvidenceSnapshot(snapshot,{codec,assembleAssistantStre
 
 // Legacy callers may render already recovered event snapshots, never raw historical codecs.
 export function renderSessionTranscript(events,{tokenLimit=150000,header,fileHandleText}={}) {return serializeTieredInput(normalizeSessionEvents(events,{header,fileHandleText}).items,tokenLimit)}
-export const usesExternalContext=events=>events.some(event=>['tool/result','tool/call'].includes(event.type)&&/^(web_search|web_fetch|mcp[_.-]|browser)/i.test(event.data?.tool??event.data?.name??event.data?.toolName??''))
+export const usesExternalContext=events=>events.some(event=>['tool/result','tool/call','tool/ptc-dispatch','tool/ptc-dispatch-start'].includes(event.type)&&/^(web_search|web_fetch|mcp[_.-]|browser)/i.test(event.data?.tool??event.data?.name??event.data?.toolName??''))
 export async function listSessionFiles(root) {
  const paths=[]
  for(const project of await readdir(root,{withFileTypes:true}))if(project.isDirectory())for(const session of await readdir(join(root,project.name),{withFileTypes:true}))if(session.isDirectory())for(const name of await readdir(join(root,project.name,session.name)))if(/\.jsonl(?:\.zstd)?$/.test(name))paths.push(join(root,project.name,session.name,name))

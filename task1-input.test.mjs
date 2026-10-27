@@ -83,6 +83,10 @@ test('file handles retain metadata without reading or inventing paths',()=>{
  assert.equal(items[0].content[0].type,'input_text')
  assert.match(serializeTieredInput(items,1000),/report\.xlsx/)
 })
+test('marked fragments use Rust whitespace and ASCII-only case matching',()=>{
+ for(const text of ['\ufeff<skill>literal evidence</skill>','<sKill>literal evidence</sKill>'])assert.deepEqual(sanitizeResponseItem(message('user',text)),message('user',text))
+ assert.equal(sanitizeResponseItem(message('user','\u0085<SKILL>injected</SKILL>\u0085')),null)
+})
 test('tool truncation retains tail and row caps',()=>{
  const out=serializeTieredInput([{type:'function_call_output',call_id:'x',output:'A'.repeat(25000)+'TAIL'}],30000)
  assert.match(out,/chars truncated/);assert.match(out,/TAIL/);assert.ok(Buffer.byteLength(out)<8100)

@@ -16,7 +16,7 @@ export function normalizeOptions(raw={}, {strict=false}={}){
   if(typeof value!==kind||kind==='number'&&(!Number.isSafeInteger(value)||value<0))throw configError('INVALID_CONFIG_FIELD')
   result[key]=value
  }
- if(result.concurrencyLimit<1||result.stage1LeaseSeconds<1||result.phase2LeaseSeconds<1||result.phase2HeartbeatSeconds<1)throw configError('INVALID_LIFECYCLE_LIMIT')
+ if(result.concurrencyLimit<1||result.stage1LeaseSeconds<1||result.phase2LeaseSeconds<1||result.phase2HeartbeatSeconds<1||result.agentTimeoutMs>2147483647||result.phase2HeartbeatSeconds>Math.floor(2147483647/1000))throw configError('INVALID_LIFECYCLE_LIMIT')
  for(const stage of [1,2]){
   const prefix=`stage${stage}`,p=result[prefix+'Provider'],m=result[prefix+'Model']
   if(Boolean(p)!==Boolean(m))throw configError('INCOMPLETE_ROUTE')

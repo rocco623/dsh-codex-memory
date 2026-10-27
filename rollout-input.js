@@ -7,7 +7,14 @@ export const OMITTED = '[... response items omitted ...]\n'
 const bytes = text => Buffer.byteLength(text)
 const utf8 = new TextDecoder('utf-8',{fatal:true})
 const allowed = new Set(['message','agent_message','local_shell_call','function_call','tool_search_call','function_call_output','tool_search_output','custom_tool_call','custom_tool_call_output','web_search_call'])
-const marked = (text,start,end) => typeof text === 'string' && text.trimStart().toLowerCase().startsWith(start.toLowerCase()) && text.trimEnd().toLowerCase().endsWith(end.toLowerCase())
+const marked = (text,start,end) => {
+ if(typeof text!=='string')return false
+ let left=0,right=text.length
+ while(left<right&&/\p{White_Space}/u.test(text[left]))left++
+ while(right>left&&/\p{White_Space}/u.test(text[right-1]))right--
+ const asciiLower=value=>value.replace(/[A-Z]/g,ch=>ch.toLowerCase())
+ return right-left>=Math.max(start.length,end.length)&&asciiLower(text.slice(left,left+start.length))===asciiLower(start)&&asciiLower(text.slice(right-end.length,right))===asciiLower(end)
+}
 
 // ResponseItem field order is the fixed protocol enum's serde order, not input key order.
 const fields = {

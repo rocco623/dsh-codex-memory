@@ -63,6 +63,7 @@ test('whole consolidation publishes one baseline and runs again in the same sess
  assert.ok(archived);assert.equal(readFileSync(join(home,archived),'utf8'),'synthetic private diagnostics')
  await pipeline.run({sessionId:'current',route:{provider:'synthetic',model:'synthetic'}})
  assert.equal(llm.requests.length,2,JSON.stringify(messages));assert.equal(pipeline.status().jobs[0].status,'done')
+ const validation=await pipeline.readiness();assert.equal(validation.stage1.state,'ready');assert.equal(validation.stage2.state,'ready');assert.equal(llm.requests.length,2)
 })
 test('known fresh creation overrides a raced legacy bootstrap default but never a user mode',{skip:!native},t=>{
  const {pipeline,session}=fixture(t,{options:{generateMemories:false}})
@@ -72,6 +73,43 @@ test('known fresh creation overrides a raced legacy bootstrap default but never 
  pipeline.store.setSourceMode('current','enabled')
  pipeline.handleCreated({agent:{session},source:'startup'})
  assert.equal(pipeline.store.getSource('current').memory_mode,'enabled')
+})
+test('readiness metadata requests are aborted and drained before store close',{skip:!native},async t=>{
+ let started;const entered=new Promise(resolve=>{started=resolve})
+ const llm={async prepareCall(config,signal){started();await new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>reject(signal.reason),{once:true})})}}
+ const {pipeline}=fixture(t,{llm,options:{stage1Provider:'p',stage1Model:'m'}})
+ const query=pipeline.readiness();await entered
+ const stopped=pipeline.stop();await assert.rejects(query,e=>e.code==='disposed');await stopped
+})
+test('PTC external execution marks captured policy and interrupted citations stay inert',{skip:!native},t=>{
+ const {pipeline,session}=fixture(t,{options:{disableOnExternalContext:true}});pipeline.handleCreated({agent:{session},source:'startup'})
+ pipeline.handleEvent(session,{type:'tool/ptc-dispatch',seq:1,data:{rootCallId:'outer',parentCallId:'outer',subCallId:'web',name:'web_fetch',arguments:{url:'https://synthetic.invalid'},isError:false,content:[{type:'text',text:'synthetic'}]}})
+ assert.equal(pipeline.store.getSource('current').memory_mode,'polluted')
+ pipeline.store.run("INSERT INTO stage1_outputs(thread_id,source_updated_at,rollout_summary,generated_at) VALUES('current',1,'synthetic',1)")
+ const citation={type:'assistant/message',seq:2,data:{interrupted:true,message:{id:'partial',content:[{type:'text',text:'<oai-mem-citation><rollout_ids>current</rollout_ids></oai-mem-citation>'}]}}}
+ pipeline.handleEvent(session,citation)
+ assert.equal(pipeline.store.db.prepare('SELECT COUNT(*) AS n FROM citation_messages').get().n,0)
+ citation.data.interrupted=false;citation.data.message.id='normal';pipeline.handleEvent(session,citation);pipeline.handleEvent(session,citation)
+ assert.equal(pipeline.store.db.prepare('SELECT usage_count FROM stage1_outputs').get().usage_count,1)
+})
+test('stage2 refresh excludes a source removed while stage1 was sampling',{skip:!native},async t=>{
+ const require=createRequire(import.meta.url),sdk='/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/'
+ const codec=require(sdk+'dsh-session-format-v3-to-v4').releasedV4SessionFormatCodec,parseFilename=require(sdk+'dsh-session-format').parseSessionFormatLogFilename
+ const extract=[{type:'block-end',index:0,block:{type:'tool-call',id:'output',name:'memory_stage1_write_output',arguments:JSON.stringify({rollout_summary:'new synthetic',rollout_slug:'review'})}},{type:'finish',reason:{kind:'tool-calls'}}]
+ const llm=model([extract,summaryCall,final]),{pipeline,home,ctx,session}=fixture(t,{llm,codec,parseFilename})
+ const time=Date.now()-7*3600000,header={version:4,id:'deleted-review',createdAt:time-1000,isSeeded:false,delegationDepth:0}
+ const directory=join(home,'logs','project',header.id),path=join(directory,'session.v4.jsonl');mkdirSync(directory,{recursive:true})
+ const event={seq:0,time,type:'user/message',data:native.createUserMessage({source:{kind:'user'},content:[{type:'text',text:'synthetic'}]})}
+ writeFileSync(path,JSON.stringify(codec.encodeHeader(header,0))+'\n'+JSON.stringify(codec.encodeEvent(event))+'\n');utimesSync(path,new Date(time),new Date(time))
+ const persisted={header,revision:'review-revision'};let deleted=false
+ ctx.sessionPersistence={locate:h=>({kind:'jsonl',path:join(home,'logs','project',h.id,'session.v4.jsonl')}),list:async()=>deleted?[]:[persisted],stat:async id=>!deleted&&id===header.id?persisted:undefined}
+ ctx.sessionQuery.listSessions=async()=>[{header:session.header,live:true,persisted:false},...(deleted?[]:[{header,live:false,persisted:true}])]
+ pipeline.store.run('INSERT INTO stage1_outputs(thread_id,source_updated_at,rollout_summary,generated_at) VALUES(?,?,?,?)',header.id,Math.floor(time/1000)-3600,'old synthetic',Math.floor(time/1000)-3600)
+ const prepare=llm.prepareCall.bind(llm)
+ llm.prepareCall=async(...args)=>{const bound=await prepare(...args),stream=bound.stream;return {...bound,stream(request){const result=stream(request);return(async function*(){yield*result;if(request.tools[0]?.name==='memory_stage1_write_output'){assert.equal(dirname(resolve(directory)),resolve(home,'logs','project'));assert.equal(basename(directory),'deleted-review');rmSync(resolve(directory),{recursive:true});deleted=true}})()}}}
+ await pipeline.run({sessionId:'current',route:{provider:'synthetic',model:'synthetic'}})
+ assert.equal(deleted,true);assert.equal(pipeline.store.getSource(header.id).presence,'missing')
+ assert.equal(pipeline.store.db.prepare('SELECT selected_for_phase2 FROM stage1_outputs WHERE thread_id=?').get(header.id).selected_for_phase2,0)
 })
 test('v4 extraction and consolidation preserve original log bytes',{skip:!native},async t=>{
  const require=createRequire(import.meta.url),root='/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/'
