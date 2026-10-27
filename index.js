@@ -1,10 +1,11 @@
 import * as fs from 'node:fs'
 import {join} from 'node:path'
+import {addAbortSignal} from 'node:stream'
 import z from '@deepseek-ai/schemastery'
 import * as runtime from '@deepseek-ai/dsh-llm'
 import {releasedV4SessionFormatCodec as codec} from '@deepseek-ai/dsh-session-format-v3-to-v4'
 import {parseSessionFormatLogFilename as parseFilename} from '@deepseek-ai/dsh-session-format'
-import {DEFAULTS,normalizeOptions,configOrigins,stageRoute} from './config.js'
+import {DEFAULTS,MEMORY_LIMITS,normalizeOptions,configOrigins,stageRoute} from './config.js'
 import {createMemoryPipeline} from './pipeline.js'
 import {buildReadPathInstructions} from './prompts.js'
 import {truncateTokens} from './model.js'
@@ -81,18 +82,19 @@ export function apply(ctx,config={}){
  ctx.on('loader/volatile-update',synchronizeTools)
  ctx.effect(()=>()=>{for(const dispose of registered)dispose();registered=[]},'memory: unregister public tools')
 
- async function validateSettings(values){
+ async function validateSettings(values,signal){
   if(!values||typeof values!=='object'||Array.isArray(values))throw memoryError('INVALID_CONFIG','values object required')
   const validated=normalizeOptions(values,{strict:true})
   for(const stage of [1,2]){
    try{stageRoute(validated,stage,{})}catch(error){if(error.code==='NO_TRIGGER_ROUTE')continue;throw error}
-   await pipeline.driver.prepare(stage,validated,{})
+   await pipeline.driver.prepare(stage,validated,{},signal);signal.throwIfAborted()
   }
   return validated
  }
  ctx.inject(['webServer'],scoped=>scoped.effect(()=>scoped.webServer.register({kind:'prefix',path:'/dsh-codex-memory',handler:async(req,res)=>{
   const send=(status,value)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(value))}
-  try{
+  try{return await pipeline.control(async signal=>{
+   signal.throwIfAborted();addAbortSignal(signal,req)
    const base=`http://${req.headers.host??'localhost'}`,url=new URL(req.url??'/',base),path=url.pathname.slice('/dsh-codex-memory'.length)
    if(req.headers.origin&&req.headers.origin!==new URL(base).origin)return send(403,{ok:false,error:'ORIGIN_MISMATCH'})
    if(!['GET','POST'].includes(req.method))return send(405,{ok:false,error:'METHOD_NOT_ALLOWED'})
@@ -104,23 +106,24 @@ export function apply(ctx,config={}){
     try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch(cause){throw memoryError('INVALID_JSON','invalid JSON',cause)}
     if(!body||typeof body!=='object'||Array.isArray(body))throw memoryError('INVALID_JSON','object required')
    }
-   if(path==='/config'&&req.method==='GET')return send(200,{ok:true,values:options(),origins:configOrigins(raw()),validation:await pipeline.readiness()})
+   signal.throwIfAborted()
+   if(path==='/config'&&req.method==='GET')return send(200,{ok:true,values:options(),limits:MEMORY_LIMITS,origins:configOrigins(raw()),validation:await pipeline.readiness()})
    if(path==='/config'&&req.method==='POST'){
-    strictFields(body,['values']);const next=await validateSettings(body.values)
+    strictFields(body,['values']);const next=await validateSettings(body.values,signal)
     const entry=ctx.fiber?.entry,editor=ctx.get('configEditor')
     if(!entry||!editor)return send(409,{ok:false,error:'NO_CONFIG_EDITOR'})
-    await editor.edit(entry,()=>({...next,memoryConfigVersion:2}));synchronizeTools()
-    return send(200,{ok:true,values:options(),origins:configOrigins(raw()),validation:await pipeline.readiness()})
+    signal.throwIfAborted();await editor.edit(entry,()=>{signal.throwIfAborted();return {...next,memoryConfigVersion:2}});signal.throwIfAborted();synchronizeTools()
+    return send(200,{ok:true,values:options(),limits:MEMORY_LIMITS,origins:configOrigins(raw()),validation:await pipeline.readiness()})
    }
    if(path==='/capabilities'&&req.method==='GET'){
     const provider=url.searchParams.get('provider'),model=url.searchParams.get('model')
     if(!provider||!model)return send(400,{ok:false,error:'ROUTE_REQUIRED'})
-    const info=await ctx.llm.resolveModelInfo(provider,model)
+    const info=await ctx.llm.resolveModelInfo(provider,model,signal);signal.throwIfAborted()
     return send(200,{ok:true,provider,model,context:info.context??null,reasoning:info.reasoning??null})
    }
    if(path==='/status'&&req.method==='GET')return send(200,{ok:true,...pipeline.status(),root:pipeline.memoryRoot,validation:await pipeline.readiness()})
    if(path==='/threads'&&req.method==='GET'){
-    await pipeline.bootstrap()
+    await pipeline.bootstrap();signal.throwIfAborted()
     const offset=Number(url.searchParams.get('cursor')??0)
     if(!Number.isSafeInteger(offset)||offset<0)throw memoryError('InvalidArgument','invalid cursor')
     const all=pipeline.store.listSources(),items=all.slice(offset,offset+200).map(row=>({sessionId:row.session_id,memoryMode:row.memory_mode,modeOrigin:row.mode_origin,presence:row.presence,readStatus:row.read_status,archived:!!row.archived,updatedAtMs:row.source_updated_at_ms}))
@@ -134,17 +137,17 @@ export function apply(ctx,config={}){
     if(!pipeline.store.getSource(id))return send(404,{ok:false,error:'UNKNOWN_SESSION'})
     let cursor
     if(body.mode==='enabled'){
-     const lease=await ctx.sessionQuery.observeSession(id,{projectionMode:'none'})
+     const lease=await ctx.sessionQuery.observeSession(id,{projectionMode:'none',signal})
      try{cursor=lease.cursor}finally{lease[Symbol.dispose]()}
     }
-    pipeline.store.setSourceMode(id,body.mode,{eventSeq:cursor})
+    signal.throwIfAborted();pipeline.store.setSourceMode(id,body.mode,{eventSeq:cursor})
     return send(200,{ok:true})
    }
    if(path==='/reset'&&req.method==='POST'){
     strictFields(body,['confirm']);pipeline.reset(body.confirm);return send(200,{ok:true})
    }
    return send(404,{ok:false,error:'NOT_FOUND'})
-  }catch(error){
+  })}catch(error){
    report('warn','control request failed',{error})
    const code=codeOf(error),status=code==='busy'||code==='reset_busy'||code==='reset_pending'?409:code==='BODY_TOO_LARGE'?413:code==='INTERNAL_ERROR'?500:400
    return send(status,{ok:false,error:code})

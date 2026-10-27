@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import {openMemoryStore} from './db.js'
 import { createMemoryBackend } from './memory-backend.js'
 import { createPrivateWorkspaceTools } from './private-workspace-tools.js'
 import { execFileSync } from 'node:child_process'
@@ -260,4 +261,17 @@ test('private mutation guard is synchronous and owns final validation/publicatio
  assert.throws(()=>b.dispatch('memory_workspace_remove',{path:'a'}),e=>e.code==='ENOTEMPTY')
  b.dispatch('memory_workspace_remove',{path:'new'})
  assert.equal(fs.existsSync(join(root,'new')),false)
+})
+
+test('stale diff cleanup cannot remove a newer reset generation artifact',async t=>{
+ const root=temporary(t),database=join(temporary(t),'state.sqlite');let time=1000
+ const a=openMemoryStore(database,{clock:()=>time}),b=openMemoryStore(database,{clock:()=>time})
+ try{
+  a.publishSources([]);const claim=a.tryClaimGlobalPhase2Job('old-worker',10,0),options={ownedMutation:fn=>a.withOwnedMutation(claim.token,claim.generation,fn)}
+  await prepareMemoryWorkspace(root,options);a.assertPhase2Ownership(claim.token,claim.generation)
+  time=1011;const generation=b.beginReset();b.finishReset(generation)
+  const path=join(root,WORKSPACE_DIFF_FILENAME);fs.writeFileSync(path,'new generation artifact')
+  await assert.rejects(memoryWorkspaceDiff(root,options),e=>e.code==='lost_ownership')
+  assert.equal(fs.readFileSync(path,'utf8'),'new generation artifact')
+ }finally{a.close();b.close()}
 })

@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({id:'dsh-codex-memory',factory:require=>{
  const numbers=['minRolloutIdleHours','maxRolloutAgeDays','maxRolloutsPerStartup','maxRawMemoriesForConsolidation','maxUnusedDays','concurrencyLimit','phase2SuccessCooldownSeconds','agentTimeoutMs']
  const booleans=['generateMemories','useMemories','dedicatedTools','disableOnExternalContext','diagnostics']
  function Section({t,loadCatalog}){
-  const [values,setValues]=react.useState(null),[origins,setOrigins]=react.useState({}),[catalog,setCatalog]=react.useState(null),[message,setMessage]=react.useState(''),[saving,setSaving]=react.useState(false),[status,setStatus]=react.useState(null),[threads,setThreads]=react.useState([]),[cursor,setCursor]=react.useState(0),[next,setNext]=react.useState(null)
+  const [values,setValues]=react.useState(null),[origins,setOrigins]=react.useState({}),[limits,setLimits]=react.useState({}),[catalog,setCatalog]=react.useState(null),[message,setMessage]=react.useState(''),[saving,setSaving]=react.useState(false),[status,setStatus]=react.useState(null),[threads,setThreads]=react.useState([]),[cursor,setCursor]=react.useState(0),[next,setNext]=react.useState(null)
   const fail=error=>setMessage(t('failed')+(['busy','reset_busy'].includes(error.message)?t('busy'):error.message))
   async function refresh(offset=cursor){
    const [state,page]=await Promise.all([request('/status'),request('/threads?cursor='+offset)])
@@ -44,7 +44,7 @@ window.__ModuleLoader__.load({id:'dsh-codex-memory',factory:require=>{
   }
   react.useEffect(()=>{
    let alive=true
-   request('/config').then(body=>{if(alive){setValues(body.values);setOrigins(body.origins??{})}}).catch(e=>alive&&fail(e))
+   request('/config').then(body=>{if(alive){setValues(body.values);setOrigins(body.origins??{});setLimits(body.limits??{})}}).catch(e=>alive&&fail(e))
    loadCatalog().then(body=>{if(alive){if(!body.ok)throw new Error(body.error??'MODEL_CATALOG_FAILED');setCatalog(body.value)}}).catch(e=>alive&&fail(e))
    // Status refresh is user-driven after this initial fetch; there is no polling.
    Promise.all([request('/status'),request('/threads')]).then(([state,page])=>{if(alive){setStatus(state);setThreads(page.items);setNext(page.nextCursor)}}).catch(e=>alive&&fail(e))
@@ -68,7 +68,7 @@ window.__ModuleLoader__.load({id:'dsh-codex-memory',factory:require=>{
    h('details',null,h('summary',null,t('providerLegacy')+' / '+t('modelLegacy')), ...['provider','model'].map(key=>h('label',{key,style:{display:'grid',gap:4}},t(key+'Legacy'),h('input',{style,value:values[key]??'',placeholder:t('inherit'),onChange:e=>set(key,e.target.value)})))),
    h('p',null,t('policy')),
    ...booleans.map(key=>h('label',{key},h('input',{type:'checkbox',checked:values[key]===true,onChange:e=>set(key,e.target.checked)}),' ',t(key))),
-   h('details',null,h('summary',null,'Limits'),...numbers.map(key=>h('label',{key,style:{display:'grid',gap:4,margin:'8px 0'}},t(key),h('input',{type:'number',min:0,step:1,style,value:values[key],onChange:e=>set(key,e.target.value)})))),
+   h('details',null,h('summary',null,'Limits'),...numbers.map(key=>h('label',{key,style:{display:'grid',gap:4,margin:'8px 0'}},t(key),h('input',{type:'number',min:limits[key]?.[0]??0,max:limits[key]?.[1],step:1,style,value:values[key],onChange:e=>set(key,e.target.value)})))),
    h('button',{type:'button',style,disabled:saving,onClick:save},t('save')),h('p',{role:'status','aria-live':'polite'},message),
    h('div',null,h('button',{type:'button',style,onClick:()=>refresh().catch(fail)},t('refresh')),' ',h('button',{type:'button',style,onClick:reset},t('reset'))),
    status?h('p',null,status.control.reset_pending?'reset pending':status.control.catalog_ready?t('ready'):t('uncertain'),' · running: '+status.running+' · max sources: '+status.progress.max_thread_count):null,

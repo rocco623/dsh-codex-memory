@@ -46,7 +46,7 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
      const output=await driver.extract(plan,{items:evidence.items,rolloutPath:row.physical_path??`session:${row.session_id}`,rolloutCwd:evidence.metadata?.cwd,rolloutGitBranch:row.git_branch},{signal:signalJob,assertOwnership})
      assertOwnership()
      if(!await validateSourceSnapshot(ctx,row.snapshot,{parseFilename,signal:signalJob}))throw memoryError('stale','source changed after extraction')
-     const completed=/\P{White_Space}/u.test(output.rolloutSummary)
+     const completed=output.rolloutSummary!==''
       ?store.stage1JobSucceeded(row.session_id,claim.token,{...output,sourceUpdatedAt:claim.watermark},claim.sourceVersion)
       :store.stage1JobSucceededNoOutput(row.session_id,claim.token,claim.sourceVersion)
      if(!completed)throw memoryError('lost_ownership','stage1 publication rejected')
@@ -83,7 +83,7 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
    const selected=store.getPhase2InputSelection(opts.maxRawMemoriesForConsolidation,opts.maxUnusedDays)
    await syncRolloutSummariesFromMemories(memoryRoot,selected,selected.length,options)
    await pruneOldExtensionResources(memoryRoot,Date.now(),options)
-   assertOwnership();const diff=await memoryWorkspaceDiff(memoryRoot)
+   assertOwnership();const diff=await memoryWorkspaceDiff(memoryRoot,options)
    let valid=true
    try{await validateConsolidationArtifacts(memoryRoot,options)}catch(error){if(['lost_ownership','reset_pending','catalog_uncertain'].includes(error.code))throw error;valid=false}
    if(diff.hasChanges()||!valid){
@@ -210,5 +210,5 @@ export function createMemoryPipeline(ctx,{home,readOptions,runtime,codec,parseFi
   const running_jobs=jobs.filter(job=>job.status==='running'&&job.lease_until>store.clock()).length,failed_jobs=jobs.filter(job=>job.status==='error').length
   return {control,progress,jobs,sources,summary_valid,stage1_count:store.get('SELECT COUNT(*) AS n FROM stage1_outputs').n,running:running_jobs,running_jobs,failed_jobs,max_consolidated_thread_count:progress.max_thread_count,generateMemories:options.generateMemories,useMemories:options.useMemories,dedicatedTools:options.dedicatedTools}
  }
- return {store,memoryRoot,driver,backend,run,handleCreated,handleEvent,reset,stop,bootstrap,whenIdle,readiness,status}
+ return {control:work=>track(Symbol('control'),work),store,memoryRoot,driver,backend,run,handleCreated,handleEvent,reset,stop,bootstrap,whenIdle,readiness,status}
 }

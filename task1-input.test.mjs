@@ -91,3 +91,21 @@ test('tool truncation retains tail and row caps',()=>{
  const out=serializeTieredInput([{type:'function_call_output',call_id:'x',output:'A'.repeat(25000)+'TAIL'}],30000)
  assert.match(out,/chars truncated/);assert.match(out,/TAIL/);assert.ok(Buffer.byteLength(out)<8100)
 })
+
+test('PTC starts and settled results retain ordinary evidence once and reject conflicts',()=>{
+ const data={rootCallId:'outer',parentCallId:'outer',subCallId:'inner',name:'bash',arguments:{command:'synthetic'},isError:false,content:[{type:'text',text:'unique nested execution evidence'}]}
+ const start={type:'tool/ptc-dispatch-start',seq:1,data},settled={type:'tool/ptc-dispatch',seq:2,data}
+ const items=normalizeSessionEvents([start,settled,settled]).items
+ assert.equal(items.length,2);assert.equal(items[0].name,'bash');assert.equal(items[0].call_id,'inner');assert.equal(items[0].arguments,'{"command":"synthetic"}');assert.equal(items[1].output,'unique nested execution evidence')
+ assert.throws(()=>normalizeSessionEvents([settled,{...settled,data:{...data,content:[{type:'text',text:'conflicting evidence'}]}}]),e=>e.code==='conflict')
+ assert.equal(normalizeSessionEvents([{...settled,data:{...data,isError:true,content:[],error:{message:'nested failure'}}}]).items[1].output,'nested failure')
+ assert.equal(normalizeSessionEvents([start]).items[0].name,'bash')
+})
+test('answer and OtherAgent tiers use Rust whitespace for BOM and NEL',()=>{
+ const call={type:'function_call',name:'request_user_input',arguments:'{"questions":[]}',call_id:'q'}
+ for(const [text,human] of [['\ufeff',true],['\u0085',false]]){
+  const reply={type:'function_call_output',call_id:'q',output:JSON.stringify({answers:{q:{answers:[text]}}})}
+  assert.equal(serializeTieredInput([call,reply],2000).includes('[human user]\nAssistant question:'),human)
+  assert.equal(serializeTieredInput([message('user',text+'<subagent_notification>evidence')],2000).startsWith('[other agent]'),!human)
+ }
+})

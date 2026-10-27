@@ -72,8 +72,8 @@ export function createEventNormalizer({header,emit=()=>{},remember,fileHandleTex
  function output(item,event,blockIndex=0) {
   emit(item,{sessionId:header?.id,seq:event.seq,time:event.time,messageId:event.data?.message?.id??event.data?.id,sourceKind:event.data?.source?.kind??event.data?.message?.source?.kind,turn:event.data?.turn??turn,step:event.data?.step??step,blockIndex,callId:item.call_id})
  }
- function call(data,event,index) {
-  const item=callItem(data),key=`${event.data?.turn??turn}:${event.data?.step??step}:${item.call_id}`
+ function call(data,event,index,key) {
+  const item=callItem(data);key??=`${event.data?.turn??turn}:${event.data?.step??step}:${item.call_id}`
   if(duplicate('call',key,item))return
   output(item,event,index)
  }
@@ -83,12 +83,13 @@ export function createEventNormalizer({header,emit=()=>{},remember,fileHandleTex
    if(event.type==='turn/start'){turn=event.data.turn;return}
    if(event.type==='step/start'){step=event.data.step;return}
    if(event.type==='tool/call'){call(event.data,event,0);return}
-   if(event.type==='tool/ptc-dispatch') {
-    const d=event.data
-    if(d.name==='ask_user_question') {
-     call({...d,callId:d.subCallId},event,0)
-     output({type:'function_call_output',call_id:d.subCallId,output:!d.isError?(answerOutput(d.content)??toolOutput(d.content,undefined,fileHandleText)):toolOutput(d.content,undefined,fileHandleText)},event)
-    }
+   if(event.type==='tool/ptc-dispatch'||event.type==='tool/ptc-dispatch-start') {
+    const d=event.data,key=`ptc:${d.rootCallId??''}:${d.subCallId}`
+    call({...d,callId:d.subCallId},event,0,key)
+    if(event.type==='tool/ptc-dispatch-start')return
+    const answer=!d.isError&&d.name==='ask_user_question'&&(!d.namespace||d.namespace==='functions')?answerOutput(d.content):undefined
+    const item={type:'function_call_output',call_id:d.subCallId,output:answer??toolOutput(d.content,d.error,fileHandleText)}
+    if(!duplicate('result',key,item))output(item,event)
     return
    }
    if(!['user/message','assistant/message','tool/result'].includes(event.type))return

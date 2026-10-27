@@ -102,3 +102,15 @@ test('complete catalog is not truncated by the 5000-source claim scan limit',t=>
  assert.equal(a.publishSources(rows,{backendIdentity:'changed'}).certain,false)
  assert.equal(a.getSource(before.session_id).presence,'missing')
 })
+
+test('enable compares the observed boundary with external events from another connection',t=>{
+ const {a,b}=fixture(t)
+ for(const mode of ['disabled','polluted']){
+  const id='raced-'+mode;a.initializeSource({id,createdAt:0},{fresh:true,disableOnExternalContext:true});a.setSourceMode(id,mode,{eventSeq:1})
+  assert.equal(b.markPolluted(id,2),false);assert.equal(a.getSource(id).memory_mode,mode)
+  a.setSourceMode(id,'enabled',{eventSeq:1});assert.equal(b.getSource(id).memory_mode,'polluted');assert.equal(b.getSource(id).mode_event_seq,2)
+  a.setSourceMode(id,'enabled',{eventSeq:2});assert.equal(a.getSource(id).memory_mode,'enabled')
+  assert.equal(b.markPolluted(id,1),false);assert.equal(a.getSource(id).mode_event_seq,2)
+  assert.equal(b.markPolluted(id,3),true);assert.equal(a.getSource(id).memory_mode,'polluted')
+ }
+})

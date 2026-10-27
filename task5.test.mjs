@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtempSync,rmSync,readFileSync,writeFileSync,existsSync,mkdirSync,symlinkSync,utimesSync,readdirSync} from 'node:fs'
 import {join,resolve,dirname,basename} from 'node:path'
 import {tmpdir} from 'node:os'
-import {createRequire} from 'node:module'
+import {createRequire,syncBuiltinESMExports} from 'node:module'
 import {createMemoryPipeline} from './pipeline.js'
 import {normalizeOptions} from './config.js'
 import {parseMemoryCitation} from './citations.js'
@@ -127,4 +127,34 @@ test('v4 extraction and consolidation preserve original log bytes',{skip:!native
  assert.equal(llm.requests.length,3,JSON.stringify(messages));assert.match(llm.requests[0].messages.map(x=>x.content[0].text).join(''),/synthetic original evidence/)
  assert.equal(pipeline.store.db.prepare('SELECT rollout_summary FROM stage1_outputs').get().rollout_summary,'synthetic retained evidence')
  assert.equal(pipeline.status().progress.max_thread_count,1);assert.equal(readFileSync(path,'utf8'),bytes)
+})
+
+test('nonempty whitespace extraction replaces the old output without deleting it',{skip:!native},async t=>{
+ const require=createRequire(import.meta.url),root='/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/'
+ const codec=require(root+'dsh-session-format-v3-to-v4').releasedV4SessionFormatCodec,parseFilename=require(root+'dsh-session-format').parseSessionFormatLogFilename
+ const extract=[{type:'block-end',index:0,block:{type:'tool-call',id:'synthetic-output',name:'memory_stage1_write_output',arguments:JSON.stringify({rollout_summary:' \n',rollout_slug:'synthetic'})}},{type:'finish',reason:{kind:'tool-calls'}}]
+ const llm=model([extract,summaryCall,final]),{pipeline,home,ctx,session,messages}=fixture(t,{llm,codec,parseFilename})
+ const time=Date.now()-7*3600000,header={version:4,id:'old-source',createdAt:time-1000,isSeeded:false,delegationDepth:0,cwd:'/synthetic'}
+ const event={seq:0,time,type:'user/message',data:native.createUserMessage({source:{kind:'user'},content:[{type:'text',text:'synthetic original evidence'}]})}
+ const path=join(home,'logs','project',header.id,'session.v4.jsonl');mkdirSync(dirname(path),{recursive:true})
+ const bytes=JSON.stringify(codec.encodeHeader(header,0))+'\n'+JSON.stringify(codec.encodeEvent(event))+'\n';writeFileSync(path,bytes);utimesSync(path,new Date(time),new Date(time))
+ const persisted={header,revision:'opaque-version',sizeBytes:Buffer.byteLength(bytes)}
+ ctx.sessionPersistence={locate:h=>({kind:'jsonl',path:join(home,'logs','project',h.id,'session.v4.jsonl')}),list:async()=>[persisted],stat:async id=>id===header.id?persisted:undefined}
+ ctx.sessionQuery.listSessions=async()=>[{header:session.header,live:true,persisted:false},{header,live:false,persisted:true}]
+ pipeline.store.run('INSERT INTO stage1_outputs(thread_id,source_updated_at,rollout_summary,generated_at) VALUES(?,?,?,?)',header.id,Math.floor(time/1000)-1,'previous synthetic memory',Math.floor(Date.now()/1000))
+ await pipeline.run({sessionId:'current',route:{provider:'synthetic',model:'synthetic'}})
+ assert.equal(llm.requests.length,3,JSON.stringify(messages));assert.match(llm.requests[0].messages.map(x=>x.content[0].text).join(''),/synthetic original evidence/)
+ assert.equal(pipeline.store.db.prepare('SELECT rollout_summary FROM stage1_outputs').get().rollout_summary,' \n')
+ assert.equal(pipeline.status().progress.max_thread_count,1);assert.equal(readFileSync(path,'utf8'),bytes)
+})
+
+test('pipeline diff cleanup runs inside its owned mutation',{skip:!native},async t=>{
+ const {pipeline,messages}=fixture(t,{llm:model([summaryCall,final])})
+ const fs=createRequire(import.meta.url)('node:fs'),unlink=fs.unlinkSync,owned=pipeline.store.withOwnedMutation.bind(pipeline.store)
+ let inside=false,attempts=0,unowned=0
+ pipeline.store.withOwnedMutation=(token,generation,fn)=>owned(token,generation,()=>{inside=true;try{return fn()}finally{inside=false}})
+ fs.unlinkSync=function(path){if(path===join(pipeline.memoryRoot,'phase2_workspace_diff.md')){attempts++;if(!inside)unowned++}return unlink.call(this,path)}
+ syncBuiltinESMExports()
+ try{await pipeline.run({sessionId:'current',route:{provider:'synthetic',model:'synthetic'}})}finally{fs.unlinkSync=unlink;syncBuiltinESMExports()}
+ assert.ok(attempts>=2,JSON.stringify(messages));assert.equal(unowned,0);assert.equal(pipeline.status().jobs[0].status,'done',JSON.stringify(messages))
 })

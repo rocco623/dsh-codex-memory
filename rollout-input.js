@@ -87,8 +87,8 @@ function tierOf(item,question) {
   try {const value=JSON.parse(texts[0]);communication=typeof value.author==='string'&&typeof value.recipient==='string'&&typeof value.content==='string'&&typeof value.trigger_turn==='boolean'} catch { /* Only valid InterAgentCommunication JSON changes provenance. */ }
  }
  if(communication||kinds.some(k=>k.startsWith('multi_agent.'))||texts.some(t=>{
-  const lines=t.trimStart().split('\n')
-  return t.trimStart().startsWith('<subagent_notification>')||lines[0].startsWith('Message Type:')&&lines[1]?.startsWith('Task name:')&&lines[2]?.startsWith('Sender:')&&lines[3]==='Payload:'
+  const trimmed=t.replace(/^\p{White_Space}+/u,''),lines=trimmed.split('\n')
+  return trimmed.startsWith('<subagent_notification>')||lines[0].startsWith('Message Type:')&&lines[1]?.startsWith('Task name:')&&lines[2]?.startsWith('Sender:')&&lines[3]==='Payload:'
  })) return 2
  if(item.role==='user') return kinds.length&&kinds.every(k=>!k.startsWith('user.'))||texts.some(t=>marked(t,'<environment_context>','</environment_context>'))?4:0
  return item.phase==='commentary'?3:1
@@ -118,7 +118,7 @@ export function serializeTieredInput(items,tokenLimit) {
   else if(item.type==='function_call_output'&&questions.has(item.call_id)) {
    let reply
    try {reply=JSON.parse(typeof item.output==='string'?item.output:'')} catch { /* Non-JSON tool output is valid Tool evidence, never a human reply. */ }
-   if(reply?.answers&&Object.values(reply.answers).some(a=>Array.isArray(a?.answers)&&a.answers.some(t=>typeof t==='string'&&t.trim()))) {question=questions.get(item.call_id);questions.delete(item.call_id)}
+   if(reply?.answers&&Object.values(reply.answers).some(a=>Array.isArray(a?.answers)&&a.answers.some(t=>typeof t==='string'&&/\P{White_Space}/u.test(t)))) {question=questions.get(item.call_id);questions.delete(item.call_id)}
   }
   const tier=tierOf(item,question)
   let text=redactSecrets(question===undefined?serializeResponseItem(item):`Assistant question: ${question}\nHuman reply: ${serializeResponseItem(item)}`)

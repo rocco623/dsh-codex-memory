@@ -108,13 +108,19 @@ class MemoryStore {
   if(!['enabled','disabled','polluted'].includes(mode))fail('invalid_mode')
   return this.atomic(()=>{
    const row=this.getSource(id);if(!row)return false
-   this.run('UPDATE source_catalog SET memory_mode=?,mode_origin=?,mode_version=mode_version+1,mode_event_seq=? WHERE session_id=?',mode,origin,eventSeq??row.mode_event_seq,id)
+   if(mode==='enabled'&&row.disable_external&&eventSeq!==undefined&&row.mode_event_seq>eventSeq){mode='polluted';origin='external_context'}
+   this.run('UPDATE source_catalog SET memory_mode=?,mode_origin=?,mode_version=mode_version+1,mode_event_seq=? WHERE session_id=?',mode,origin,Math.max(eventSeq??row.mode_event_seq,row.mode_event_seq),id)
    if(mode!=='enabled')this.forgetSelected(id)
    return true
   })
  }
  markPolluted(id,eventSeq){
-  return this.atomic(()=>{const row=this.getSource(id);if(!row?.disable_external||row.memory_mode!=='enabled'||eventSeq<=row.mode_event_seq)return false;return this.setSourceMode(id,'polluted',{origin:'external_context',eventSeq})})
+  return this.atomic(()=>{
+   const row=this.getSource(id);if(!row?.disable_external||eventSeq<=row.mode_event_seq)return false
+   if(row.memory_mode==='enabled')return this.setSourceMode(id,'polluted',{origin:'external_context',eventSeq})
+   this.run('UPDATE source_catalog SET mode_event_seq=? WHERE session_id=?',eventSeq,id)
+   return false
+  })
  }
  forgetSelected(id){if(this.get('SELECT selected_for_phase2 FROM stage1_outputs WHERE thread_id=?',id)?.selected_for_phase2)this.enqueueConsolidation(this.clock())}
  eligibleStage1({currentThreadId,maxAgeDays,minIdleHours,nowMs=this.clock()*1000}){

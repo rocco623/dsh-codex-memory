@@ -6,6 +6,7 @@ export const DEFAULTS={
  agentTimeoutMs:0,provider:'',model:'',stage1Provider:'',stage1Model:'',stage2Provider:'',stage2Model:'',
  stage1ReasoningEffort:'codex',stage2ReasoningEffort:'codex',diagnostics:true,memoryConfigVersion:2,
 }
+export const MEMORY_LIMITS={maxRawMemoriesForConsolidation:[1,4096],maxRolloutsPerStartup:[1,128],minRolloutIdleHours:[1,48],maxUnusedDays:[0,365],maxRolloutAgeDays:[0,90]}
 export const configError=(code,cause)=>Object.assign(new Error(`memory configuration ${code}`,{cause}),{code})
 export function normalizeOptions(raw={}, {strict=false}={}){
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw configError('INVALID_CONFIG')
@@ -16,6 +17,7 @@ export function normalizeOptions(raw={}, {strict=false}={}){
   if(typeof value!==kind||kind==='number'&&(!Number.isSafeInteger(value)||value<0))throw configError('INVALID_CONFIG_FIELD')
   result[key]=value
  }
+ for(const [key,[min,max]] of Object.entries(MEMORY_LIMITS))if(result[key]<min||result[key]>max)throw configError('INVALID_CONFIG_FIELD')
  if(result.concurrencyLimit<1||result.stage1LeaseSeconds<1||result.phase2LeaseSeconds<1||result.phase2HeartbeatSeconds<1||result.agentTimeoutMs>2147483647||result.phase2HeartbeatSeconds>Math.floor(2147483647/1000))throw configError('INVALID_LIFECYCLE_LIMIT')
  for(const stage of [1,2]){
   const prefix=`stage${stage}`,p=result[prefix+'Provider'],m=result[prefix+'Model']

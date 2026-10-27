@@ -37,7 +37,7 @@ async function fixture(t){
   let status,value;const response={writeHead(code){status=code},end(data){value=JSON.parse(data)}}
   await route(request,response);return {status,...value}
  }
- return {home,ctx,config,call,tools,sections,logs,get streamCalls(){return streamCalls}}
+ return {home,ctx,config,call,tools,sections,logs,effects,handlers,get streamCalls(){return streamCalls}}
 }
 test('native entry preserves absent defaults, gates schemas and rejects malformed or unsupported settings',{skip:!target},async t=>{
  const f=await fixture(t),initial=await f.call('/config')
@@ -103,4 +103,55 @@ test('control API guards origin, JSON and confirmation; summary provider never a
  assert.equal((await f.call('/reset',{confirm:'wrong'})).status,400);assert.ok(existsSync(join(root,'memory_summary.md')))
  assert.equal((await f.call('/reset',{confirm:'clear-v2-memory'})).status,200);assert.equal(existsSync(join(root,'memory_summary.md')),false)
  assert.equal(f.streamCalls,0)
+})
+
+test('config rejects values outside native ranges before saving',{skip:!target},async t=>{
+ const f=await fixture(t)
+ for(const [key,value] of [['maxRawMemoriesForConsolidation',0],['maxRawMemoriesForConsolidation',4097],['maxRolloutsPerStartup',0],['maxRolloutsPerStartup',129],['minRolloutIdleHours',0],['minRolloutIdleHours',49],['maxUnusedDays',366],['maxRolloutAgeDays',91]])assert.equal((await f.call('/config',{values:{[key]:value}})).status,400,key)
+ const saved=await f.call('/config',{values:{maxRawMemoriesForConsolidation:4096,maxRolloutsPerStartup:128,minRolloutIdleHours:48,maxUnusedDays:365,maxRolloutAgeDays:90}})
+ assert.equal(saved.status,200);assert.equal(saved.values.maxRawMemoriesForConsolidation,4096)
+})
+test('shutdown cancels config validation before persistent save',{skip:!target},async t=>{
+ const f=await fixture(t);let entered,release,receivedSignal
+ const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r),prepare=f.ctx.llm.prepareCall
+ f.ctx.llm.prepareCall=async function(config,signal,...rest){receivedSignal=signal;entered();await new Promise((resolve,reject)=>{gate.then(resolve);signal?.addEventListener('abort',()=>reject(signal.reason),{once:true})});return prepare.call(this,config,signal,...rest)}
+ const request=f.call('/config',{values:{stage1Provider:'p',stage1Model:'m'}});await started
+ const stopping=f.effects[0]();release();const result=await request;await stopping
+ assert.equal(receivedSignal?.aborted,true);assert.equal(result.error,'disposed');assert.equal(f.config.stage1Provider.get(),undefined)
+})
+test('enable retains external events after its observed cursor',{skip:!target},async t=>{
+ const f=await fixture(t),{openMemoryStore}=await import('./db.js'),store=openMemoryStore(join(f.home,'memory_state.db'))
+ try{
+  store.initializeSource({id:'race',createdAt:0},{fresh:true,disableOnExternalContext:true});store.setSourceMode('race','polluted',{eventSeq:1})
+  let entered,release;const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r)
+  f.ctx.sessionQuery.observeSession=async()=>{entered();await gate;return {cursor:1,[Symbol.dispose](){}}}
+  const request=f.call('/thread-mode',{thread_id:'race',mode:'enabled'});await started
+  for(const handler of f.handlers.get('session/event'))handler({id:'race'},{type:'tool/call',seq:2,data:{name:'web_fetch'}})
+  release();assert.equal((await request).status,200);assert.equal(store.getSource('race').memory_mode,'polluted');assert.equal(store.getSource('race').mode_event_seq,2)
+ }finally{store.close()}
+})
+
+test('shutdown drains metadata and observation services that ignore cancellation',{skip:!target},async t=>{
+ for(const kind of ['capabilities','thread-mode'])await t.test(kind,async t=>{
+  const f=await fixture(t),{openMemoryStore}=await import('./db.js'),store=openMemoryStore(join(f.home,'memory_state.db'))
+  let entered,release,signal,disposed=0;const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r)
+  try{
+   store.initializeSource({id:'drain',createdAt:0});store.setSourceMode('drain','disabled')
+   f.ctx.llm.resolveModelInfo=async(p,m,s)=>{signal=s;entered();await gate;return {}}
+   f.ctx.sessionQuery.observeSession=async(id,options)=>{signal=options.signal;entered();await gate;return {cursor:1,[Symbol.dispose](){disposed++}}}
+   const request=kind==='capabilities'?f.call('/capabilities?provider=p&model=m'):f.call('/thread-mode',{thread_id:'drain',mode:'enabled'})
+   await started;let stopped=false;const stopping=f.effects[0]().then(()=>{stopped=true})
+   await Promise.resolve();assert.equal(signal.aborted,true);assert.equal(stopped,false)
+   release();assert.equal((await request).error,'disposed');await stopping
+   assert.equal(disposed,kind==='thread-mode'?1:0);assert.equal(store.getSource('drain').memory_mode,'disabled')
+  }finally{release?.();store.close()}
+ })
+})
+test('shutdown drains a pending editor and rejects a late configuration callback',{skip:!target},async t=>{
+ const f=await fixture(t),get=f.ctx.get;let entered,release
+ const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r)
+ f.ctx.get=name=>{const value=get(name);if(name!=='configEditor')return value;return {async edit(...args){entered();await gate;return value.edit(...args)}}}
+ const request=f.call('/config',{values:{generateMemories:false}});await started
+ let stopped=false;const stopping=f.effects[0]().then(()=>{stopped=true});await Promise.resolve();assert.equal(stopped,false)
+ release();assert.equal((await request).error,'disposed');await stopping;assert.equal(f.config.generateMemories.get(),undefined)
 })
