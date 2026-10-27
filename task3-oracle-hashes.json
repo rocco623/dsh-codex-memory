@@ -1,0 +1,29 @@
+{
+  "commit": "c260087efe8cc6dcc0526e7018ae9e0e3fc134e3",
+  "algorithm": "sha256",
+  "files": {
+    "codex-rs/ext/memories/src/tests.rs": "1055910cd20a69b673411fc82dc1f011380b8c52c91be7cd0e86f337507da58f",
+    "codex-rs/ext/memories/src/local/search.rs": "e1c66711ad3ff5ac2ecc482f824a987ab86264bdb69ce859356a6330979b4f56",
+    "codex-rs/ext/memories/src/local/list.rs": "b6b8f241bd62941746aefa73362ef404d765342ed21d9704f9cfafc2395816dc",
+    "codex-rs/ext/memories/src/local/read.rs": "554d8e711497a64b00a09a1f1f1b80af97128eca540fb6bffae925fd1f2d1e58",
+    "codex-rs/ext/memories/src/local/ad_hoc_note.rs": "4bf2b4ebe79c7c1df3bc2381286b9d7800b41c9b8ee2d96d153609fc606de3c1",
+    "codex-rs/memories/write/src/workspace.rs": "78a61bcb6b5e40eaf3139aee205f2fa35c46b7f19154bdeb006cd3cbec436ceb",
+    "codex-rs/memories/write/src/storage_tests.rs": "59f6e0c8264b6662ef7f2a83cff86f02a06f2f86a2e46db360ef0740b488d6fb",
+    "codex-rs/memories/write/src/extensions/prune.rs": "41ec307dc697cc2bfd9eb2928bc2fe2a121210cba7aeda0cf1fe1ecb2affe1f1"
+  },
+  "local_fixture": {
+    "path": "task3-fixtures.json",
+    "sha256": "734cbdb39d3f7b5e822cbe4032be856528aa05810aefb14ebc074df4fb1240f7"
+  },
+  "remote_oracles": [
+    "https://github.com/openai/codex/blob/c260087efe8cc6dcc0526e7018ae9e0e3fc134e3/codex-rs/git-utils/src/baseline.rs",
+    "https://github.com/openai/codex/blob/c260087efe8cc6dcc0526e7018ae9e0e3fc134e3/codex-rs/utils/string/src/truncate.rs",
+    "https://github.com/openai/codex/blob/c260087efe8cc6dcc0526e7018ae9e0e3fc134e3/codex-rs/utils/output-truncation/src/lib.rs"
+  ],
+  "limitations": [
+    "No Rust oracle runner executed: Git CLI Myers vs similar crate tie selection is not proven identical for all repeated-line inputs.",
+    "Baseline/plumbing uses synchronous child processes inside the supplied ownership transaction; only small synthetic trees measured.",
+    "Real DB ownership callback, registered public tool gates, and diagnostic relocation are integration work owned by Task2/5.",
+    "No real HOME, installed plugin, real memories, or model calls exercised."
+  ]
+}

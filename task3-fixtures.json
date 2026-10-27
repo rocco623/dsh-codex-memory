@@ -1,0 +1,38 @@
+{
+  "commit": "c260087efe8cc6dcc0526e7018ae9e0e3fc134e3",
+  "source": "codex-rs/ext/memories/src/tests.rs",
+  "cases": [
+    {
+      "oracle": "read_tool_reads_memory_file",
+      "method": "read",
+      "files": {"MEMORY.md": "first line\nsecond needle line\nthird line\n"},
+      "request": {"path": "MEMORY.md", "line_offset": 2, "max_lines": 1},
+      "expected": {"path": "MEMORY.md", "content": "second needle line\n", "start_line_number": 2, "truncated": true}
+    },
+    {
+      "oracle": "search_tool_accepts_multiple_queries",
+      "method": "search",
+      "files": {"MEMORY.md": "alpha only\nneedle only\nalpha needle\n"},
+      "request": {"queries": ["alpha", "needle"], "case_sensitive": false},
+      "expected": {"queries": ["alpha", "needle"], "match_mode": {"type": "any"}, "path": null, "matches": [
+        {"path": "MEMORY.md", "match_line_number": 1, "content_start_line_number": 1, "content": "alpha only", "matched_queries": ["alpha"]},
+        {"path": "MEMORY.md", "match_line_number": 2, "content_start_line_number": 2, "content": "needle only", "matched_queries": ["needle"]},
+        {"path": "MEMORY.md", "match_line_number": 3, "content_start_line_number": 3, "content": "alpha needle", "matched_queries": ["alpha", "needle"]}
+      ], "next_cursor": null, "truncated": false}
+    },
+    {
+      "oracle": "search_tool_accepts_windowed_all_match_mode",
+      "method": "search",
+      "files": {"MEMORY.md": "alpha\nmiddle\nneedle\n"},
+      "request": {"queries": ["alpha", "needle"], "match_mode": {"type": "all_within_lines", "line_count": 3}},
+      "expected": {"queries": ["alpha", "needle"], "match_mode": {"type": "all_within_lines", "line_count": 3}, "path": null, "matches": [
+        {"path": "MEMORY.md", "match_line_number": 1, "content_start_line_number": 1, "content": "alpha\nmiddle\nneedle", "matched_queries": ["alpha", "needle"]}
+      ], "next_cursor": null, "truncated": false}
+    }
+  ],
+  "git_oracle": {
+    "source": "https://github.com/openai/codex/blob/c260087efe8cc6dcc0526e7018ae9e0e3fc134e3/codex-rs/git-utils/src/baseline.rs",
+    "tests": ["diff_reports_added_modified_and_deleted_files", "reset_drops_previous_history", "status_scan_does_not_write_added_file_blobs", "reports_executable_bit_changes_as_modified"],
+    "additional_expected_provenance": "Manually derived unified headers/hunks from fixed helper render_change_diff and context_radius(3); no plugin-generated snapshots. Git CLI Myers tie cases are not a full proof of similar crate equivalence."
+  }
+}

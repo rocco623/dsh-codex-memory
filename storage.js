@@ -2,16 +2,20 @@
 // extensions/{ad_hoc,prune}.rs. Owns the on-disk shape that the consolidation
 // prompt points at: rollout_summaries/<stem>.md,
 // extensions/ad_hoc/instructions.md, and the 14-day extension resource prune.
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import * as fs from 'node:fs'
 import { join } from 'node:path'
 import { AD_HOC_INSTRUCTIONS } from './prompts.js'
+import { assertMemoryRoot, scopedPath, metadata, ownedMutation, createMemoryBackend } from './memory-backend.js'
+
+const warn = (options, event, error) => {
+  if (options.warn) options.warn(event, {error})
+  else process.emitWarning(new Error(event, {cause:error}))
+}
+const guarded = (options, fn) => ownedMutation(options,()=>{options.assertOwnership?.();return fn()})
 
 export const EXTENSIONS_SUBDIR = 'extensions'
 export const ROLLOUT_SUMMARIES_SUBDIR = 'rollout_summaries'
 export const EXTENSION_RESOURCE_RETENTION_DAYS = 14
-
-const rolloutSummariesDir = (root) => join(root, ROLLOUT_SUMMARIES_SUBDIR)
-const extensionsRoot = (root) => join(root, EXTENSIONS_SUBDIR)
 
 /** chrono's `to_rfc3339()` for a whole-second UTC instant: `...T..:..:..+00:00`. */
 const rfc3339 = (seconds) => {
@@ -46,8 +50,16 @@ export function rolloutSummaryFileStem({ threadId, sourceUpdatedAt, rolloutSlug 
   let timestampFragment
   let seed
   if (hex) {
-    // Timestamp-less UUID versions fall back to the source timestamp.
-    timestampFragment = FILENAME_TS_FORMAT(new Date(sourceUpdatedAt * 1_000))
+    const version=hex[12]
+    let timestamp=sourceUpdatedAt*1_000
+    if(version==='7')timestamp=Number(BigInt(`0x${hex.slice(0,12)}`))
+    else if(version==='1'||version==='6') {
+      const ticks=version==='1'
+        ? BigInt(`0x${hex.slice(13,16)}${hex.slice(8,12)}${hex.slice(0,8)}`)
+        : BigInt(`0x${hex.slice(0,12)}${hex.slice(13,16)}`)
+      timestamp=Number(ticks/10_000n-12_219_292_800_000n)
+    }
+    timestampFragment = FILENAME_TS_FORMAT(new Date(timestamp))
     seed = Number(BigInt(`0x${hex}`) & 0xffff_ffffn) >>> 0
   } else {
     let hash = 0
@@ -79,24 +91,18 @@ export function rolloutSummaryFileStem({ threadId, sourceUpdatedAt, rolloutSlug 
 
 const retainedMemories = (memories, max) => memories.slice(0, Math.min(memories.length, max))
 
-async function pruneRolloutSummaries(root, keep) {
-  const dirPath = rolloutSummariesDir(root)
-  let entries
-  try {
-    entries = await readdir(dirPath)
-  } catch (error) {
-    if (error?.code === 'ENOENT') return
-    throw error
-  }
-  for (const fileName of entries) {
-    if (!fileName.endsWith('.md')) continue
-    const stem = fileName.slice(0, -'.md'.length)
-    if (keep.has(stem)) continue
-    await rm(join(dirPath, fileName), { force: true })
+function pruneRolloutSummaries(root, keep, options) {
+  const dirPath = scopedPath(root, ROLLOUT_SUMMARIES_SUBDIR)
+  if(!metadata(dirPath))return
+  for(const fileName of fs.readdirSync(dirPath)) {
+    if(!fileName.endsWith('.md') || keep.has(fileName.slice(0,-3)))continue
+    try {fs.unlinkSync(join(dirPath,fileName))} catch(error) {
+      if(error.code!=='ENOENT')warn(options,'prune outdated rollout summary failed',error)
+    }
   }
 }
 
-async function writeRolloutSummaryForThread(root, memory) {
+function writeRolloutSummaryForThread(root, memory) {
   const stem = rolloutSummaryFileStem({
     threadId: memory.thread_id,
     sourceUpdatedAt: memory.source_updated_at,
@@ -110,36 +116,30 @@ async function writeRolloutSummaryForThread(root, memory) {
   ]
   if (memory.git_branch != null) lines.push(`git_branch: ${memory.git_branch}`)
   lines.push('', memory.rollout_summary)
-  await writeFile(join(rolloutSummariesDir(root), `${stem}.md`), `${lines.join('\n')}\n`)
+  createMemoryBackend(root).write({path:`${ROLLOUT_SUMMARIES_SUBDIR}/${stem}.md`, content:`${lines.join('\n')}\n`})
 }
 
 /** Codex: sync_rollout_summaries_from_memories. */
-export async function syncRolloutSummariesFromMemories(root, memories, maxRawMemories) {
-  await mkdir(rolloutSummariesDir(root), { recursive: true })
-  const retained = retainedMemories(memories, maxRawMemories)
-  const keep = new Set(
-    retained.map((memory) =>
-      rolloutSummaryFileStem({
-        threadId: memory.thread_id,
-        sourceUpdatedAt: memory.source_updated_at,
-        rolloutSlug: memory.rollout_slug,
-      }),
-    ),
-  )
-  await pruneRolloutSummaries(root, keep)
-  for (const memory of retained) await writeRolloutSummaryForThread(root, memory)
+export async function syncRolloutSummariesFromMemories(root, memories, maxRawMemories, options={}) {
+  return guarded(options,()=>{
+    root=assertMemoryRoot(root,true)
+    const directory=scopedPath(root,ROLLOUT_SUMMARIES_SUBDIR)
+    if(!metadata(directory))fs.mkdirSync(directory)
+    const retained=retainedMemories(memories,maxRawMemories)
+    const keep=new Set(retained.map(memory=>rolloutSummaryFileStem({threadId:memory.thread_id,sourceUpdatedAt:memory.source_updated_at,rolloutSlug:memory.rollout_slug})))
+    pruneRolloutSummaries(root,keep,options)
+    for(const memory of retained)writeRolloutSummaryForThread(root,memory)
+  })
 }
 
 /** Codex: extensions/ad_hoc::seed_instructions — create_new, never overwrite. */
-export async function seedExtensionInstructions(root) {
-  const extensionRoot = join(extensionsRoot(root), 'ad_hoc')
-  await mkdir(extensionRoot, { recursive: true })
-  const instructionsPath = join(extensionRoot, 'instructions.md')
-  try {
-    await writeFile(instructionsPath, AD_HOC_INSTRUCTIONS, { flag: 'wx' })
-  } catch (error) {
-    if (error?.code !== 'EEXIST') throw error
-  }
+export async function seedExtensionInstructions(root, options={}) {
+  return guarded(options,()=>{
+    root=assertMemoryRoot(root,true)
+    const instructionsPath=scopedPath(root,'extensions/ad_hoc/instructions.md',{createParents:true})
+    try {fs.writeFileSync(instructionsPath,AD_HOC_INSTRUCTIONS,{flag:'wx'})}
+    catch(error) {if(error.code!=='EEXIST')throw error} // Native create_new preserves an existing instruction file.
+  })
 }
 
 // Codex: resource_timestamp — the first 19 chars parsed as %Y-%m-%dT%H-%M-%S (UTC).
@@ -148,43 +148,40 @@ const resourceTimestamp = (fileName) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})$/.exec(head)
   if (!match) return null
   const [, year, month, day, hour, minute, second] = match
-  const ms = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))
-  return Number.isFinite(ms) ? ms : null
+  const date=new Date(0)
+  date.setUTCFullYear(Number(year),Number(month)-1,Number(day))
+  date.setUTCHours(Number(hour),Number(minute),Number(second),0)
+  return Number.isFinite(date.getTime()) && FILENAME_TS_FORMAT(date)===head ? date.getTime() : null
 }
 
 /** Codex: prune_old_extension_resources — 14-day retention on resources/. */
-export async function pruneOldExtensionResources(root, nowMs = Date.now()) {
-  const cutoff = nowMs - EXTENSION_RESOURCE_RETENTION_DAYS * 86_400_000
-  let extensions
-  try {
-    extensions = await readdir(extensionsRoot(root), { withFileTypes: true })
-  } catch (error) {
-    if (error?.code === 'ENOENT') return
-    throw error
-  }
-  for (const extension of extensions) {
-    if (!extension.isDirectory()) continue
-    const extensionPath = join(extensionsRoot(root), extension.name)
-    // Codex skips extensions that have no instructions.md.
-    try {
-      await stat(join(extensionPath, 'instructions.md'))
-    } catch {
-      continue
+export async function pruneOldExtensionResources(root, nowMs = Date.now(), options={}) {
+  return guarded(options,()=>{
+    if(!metadata(root))return
+    root=assertMemoryRoot(root)
+    const cutoff=nowMs-EXTENSION_RESOURCE_RETENTION_DAYS*86_400_000
+    let extensions
+    try {extensions=fs.readdirSync(scopedPath(root,'extensions'),{withFileTypes:true})}
+    catch(error) {if(error.code!=='ENOENT')warn(options,'read memory extensions failed',error);return}
+    for(const extension of extensions) {
+      if(!extension.isDirectory())continue
+      const extensionRelative=`extensions/${extension.name}`
+      let resourcesPath,resources
+      try {
+        const instruction=scopedPath(root,`${extensionRelative}/instructions.md`,{privatePaths:true})
+        if(!metadata(instruction))continue
+        resourcesPath=scopedPath(root,`${extensionRelative}/resources`,{privatePaths:true})
+        resources=fs.readdirSync(resourcesPath,{withFileTypes:true})
+      } catch(error) {if(error.code!=='ENOENT')warn(options,'read extension resources failed',error);continue}
+      for(const resource of resources) {
+        if(!resource.isFile() || !resource.name.endsWith('.md'))continue
+        const stamp=resourceTimestamp(resource.name)
+        if(stamp===null||stamp>cutoff)continue
+        try {
+          const path=scopedPath(root,`${extensionRelative}/resources/${resource.name}`,{privatePaths:true})
+          fs.unlinkSync(path)
+        } catch(error) {if(error.code!=='ENOENT')warn(options,'prune extension resource failed',error)}
+      }
     }
-    const resourcesPath = join(extensionPath, 'resources')
-    let resources
-    try {
-      resources = await readdir(resourcesPath, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const resource of resources) {
-      if (!resource.isFile()) continue
-      // Only `.md` resources carry a retention timestamp.
-      if (!resource.name.endsWith('.md')) continue
-      const stamp = resourceTimestamp(resource.name)
-      if (stamp === null || stamp > cutoff) continue
-      await rm(join(resourcesPath, resource.name), { force: true })
-    }
-  }
+  })
 }
