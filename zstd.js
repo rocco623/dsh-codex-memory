@@ -4,7 +4,8 @@
 // Node build shipped in the desktop runtime decodes only the first frame (one
 // frame of a 122 KB log yields 217 bytes). Node reports no consumed length, so
 // this walks the frame structure described by RFC 8878 and inflates each frame.
-import { zstdDecompressSync } from 'node:zlib'
+import { zstdDecompressSync, createZstdDecompress } from 'node:zlib'
+import { Readable } from 'node:stream'
 
 const ZSTD_MAGIC = 0xfd2fb528
 const SKIPPABLE_MASK = 0xfffffff0
@@ -48,8 +49,10 @@ export function decodeZstdFrames(buf) {
   while (offset + 4 <= buf.length) {
     const magic = buf.readUInt32LE(offset)
     if ((magic & SKIPPABLE_MASK) === SKIPPABLE_MAGIC) {
-      if (offset + 8 > buf.length) break
-      offset += 8 + buf.readUInt32LE(offset + 4)
+      if (offset + 8 > buf.length) throw new Error('truncated skippable zstd header')
+      const end = offset + 8 + buf.readUInt32LE(offset + 4)
+      if (end > buf.length) throw new Error('truncated skippable zstd frame')
+      offset = end
       continue
     }
     if (magic !== ZSTD_MAGIC) {
@@ -59,6 +62,64 @@ export function decodeZstdFrames(buf) {
     chunks.push(zstdDecompressSync(buf.subarray(offset, end)))
     offset = end
   }
+  if (offset !== buf.length) throw new Error('truncated zstd magic')
   if (chunks.length === 0) throw new Error('no zstd frames found')
   return Buffer.concat(chunks)
+}
+
+/** Stream every frame independently: desktop zlib otherwise stops after frame one. */
+export async function* decodeZstdStream(input, { signal } = {}) {
+ const iterator = input[Symbol.asyncIterator]?.() ?? input[Symbol.iterator]()
+ let buffer = Buffer.alloc(0), ended = false, count = 0
+ async function take(n, optional = false) {
+  const pieces=[];let length=0
+  while(length<n) {
+   signal?.throwIfAborted()
+   if(!buffer.length) {
+    const next=await iterator.next()
+    if(next.done) {ended=true;if(optional&&length===0)return null;throw new Error('truncated zstd stream')}
+    buffer=Buffer.from(next.value)
+   }
+   const size=Math.min(n-length,buffer.length)
+   pieces.push(buffer.subarray(0,size));buffer=buffer.subarray(size);length+=size
+  }
+  return pieces.length===1?pieces[0]:Buffer.concat(pieces,length)
+ }
+ async function* body(magic) {
+  yield magic
+  const descriptor=await take(1);yield descriptor
+  const d=descriptor[0],single=(d>>5)&1
+  if(d&0x18)throw new Error('reserved zstd descriptor')
+  const headerBytes=(single?0:1)+DICT_ID_BYTES[d&3]+(d>>6===0?(single?1:0):FCS_BYTES[d>>6])
+  if(headerBytes)yield await take(headerBytes)
+  for(;;) {
+   const header=await take(3);yield header
+   const bits=header[0]|header[1]<<8|header[2]<<16,type=(bits>>1)&3
+   if(type===3)throw new Error('reserved zstd block type')
+   let remaining=type===1?1:bits>>3
+   while(remaining) {const size=Math.min(remaining,65536);yield await take(size);remaining-=size}
+   if(bits&1)break
+  }
+  if(d&4)yield await take(4)
+ }
+ try {
+  for(;;) {
+   const magic=await take(4,true)
+   if(magic===null)break
+   const value=magic.readUInt32LE()
+   if((value&SKIPPABLE_MASK)===SKIPPABLE_MAGIC) {
+    let remaining=(await take(4)).readUInt32LE()
+    while(remaining){const n=Math.min(remaining,65536);await take(n);remaining-=n}
+    continue
+   }
+   if(value!==ZSTD_MAGIC)throw new Error('unexpected zstd frame magic')
+   count++
+   const source=Readable.from(body(magic)),decoder=createZstdDecompress()
+   source.on('error',error=>decoder.destroy(error))
+   source.pipe(decoder)
+   try {for await(const chunk of decoder){signal?.throwIfAborted();yield chunk}}
+   finally {source.destroy();decoder.destroy()}
+  }
+  if(!count)throw new Error('no zstd frames found')
+ } finally {if(!ended)await iterator.return?.()}
 }

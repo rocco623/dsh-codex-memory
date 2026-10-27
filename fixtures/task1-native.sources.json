@@ -1,0 +1,17 @@
+{
+  "commit": "c260087efe8cc6dcc0526e7018ae9e0e3fc134e3",
+  "fixture": {"path":"task1-rollout.json","sha256":"2cf95e5cec49fbc29892e2785f38f460dee7da38bb999a188a65ecce1282444f"},
+  "sources": [
+    {"path":"codex-rs/memories/write/src/rollout_input.rs","sha256":"bb08a76719684a084a61fbec7d121892d25ad276432b4b8fb23b237c7abd3f3c"},
+    {"path":"codex-rs/memories/write/src/rollout_input_tests.rs","sha256":"3e89f33b75fd24bae600cc5c2667f8564ddb163a7f587faa56ad416ac8cd445a"},
+    {"path":"codex-rs/protocol/src/models.rs","sha256":"753498bc730ba21ded710d9aa2b2f9163e6bbe4eaa18f1c25d998c36138a54f7"},
+    {"path":"codex-rs/memories/write/src/prompts.rs","sha256":"ae71fbd98fa0fe7bc0cf678ef908bfbdba915c21181c3a6cd3181a7efb98b9f1"}
+  ],
+  "adaptations": [
+    "DSH identifiers remain DSH identifiers; canonical session metadata identifies the child itself.",
+    "Every persisted assistant/message lacking phase defaults to Final, including interrupted visible messages; attempts and stream records do not add evidence.",
+    "The public rc3 v4 codec emits complete assistant/message events; the public compact-run seam expands via run.expand(), not a fabricated settlement.",
+    "No Codex effective-context override is exposed: resolved host contextWindow receives 70%; a successfully resolved missing window gets final 150000-token fallback.",
+    "Current raw v4 is streamed to a private canonical file; exact prepared/live observations may be materialized by the host, serially per source."
+  ]
+}

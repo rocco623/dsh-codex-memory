@@ -1,0 +1,24 @@
+{
+  "commit": "c260087efe8cc6dcc0526e7018ae9e0e3fc134e3",
+  "derivation": "Literal rows manually transcribed from rollout_input.rs serialize_tiered_input; newest-tier selection and source-order restoration use a hand-budgeted 100-token case.",
+  "items": [
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"h-old"}]},
+    {"type":"message","role":"assistant","content":[{"type":"output_text","text":"final"}]},
+    {"type":"agent_message","author":"agent-a","recipient":"agent-b","content":[{"type":"input_text","text":"report"}]},
+    {"type":"message","role":"assistant","content":[{"type":"output_text","text":"progress"}],"phase":"commentary"},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"cwd"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["context.runtime"]}},
+    {"type":"function_call_output","call_id":"c","output":"tool failure"},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"h-new"}]}
+  ],
+  "expectedRows": [
+    "[human user]\n{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"h-old\"}]}\n",
+    "[assistant final]\n{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"final\"}]}\n",
+    "[other agent]\n{\"type\":\"agent_message\",\"author\":\"agent-a\",\"recipient\":\"agent-b\",\"content\":[{\"type\":\"input_text\",\"text\":\"report\"}]}\n",
+    "[assistant commentary]\n{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"progress\"}],\"phase\":\"commentary\"}\n",
+    "[harness context]\n{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"cwd\"}],\"internal_chat_message_metadata_passthrough\":{\"content_item_kinds\":[\"context.runtime\"]}}\n",
+    "[tool]\n{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"tool failure\"}\n",
+    "[human user]\n{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"h-new\"}]}\n"
+  ],
+  "budget100SelectedRows": [0, 6],
+  "nativeTests": ["recent_rollout_items_bound_history_and_preserve_newest_records", "extraction_chunks_preserve_unicode_evidence_with_bounded_messages", "classifies_memory_excluded_fragments"]
+}
